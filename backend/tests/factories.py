@@ -51,14 +51,21 @@ class FakeSource:
         self,
         results: dict[str, list[ArxivEntry]] | None = None,
         failing_ids: set[str] | None = None,
+        failing_queries: set[str] | None = None,
     ) -> None:
         self.results = results or {}
         self.failing_ids = failing_ids or set()
+        # подстроки запросов, на которые arXiv отвечает ошибкой
+        self.failing_queries = failing_queries or set()
         self.queries: list[str] = []
+        self.limits: list[int] = []
         self.downloads: list[str] = []
 
     def search(self, query: str, max_results: int) -> list[ArxivEntry]:
         self.queries.append(query)
+        self.limits.append(max_results)
+        if any(needle in query for needle in self.failing_queries):
+            raise ArxivError("arXiv API вернул ошибку: incorrect query")
         for needle, entries in self.results.items():
             if needle in query:
                 return entries[:max_results]

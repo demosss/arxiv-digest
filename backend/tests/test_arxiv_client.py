@@ -9,7 +9,6 @@ from app.services.arxiv_client import (
     ArxivClient,
     ArxivError,
     ArxivUnavailableError,
-    build_search_query,
     parse_feed,
     pdf_filename,
 )
@@ -50,49 +49,6 @@ def _client(handler: httpx.MockTransport, sleeps: list[float] | None = None) -> 
         sleep=recorded.append,
         backoff_base=1,
     )
-
-
-# --- построение запроса ---
-
-
-def test_query_combines_queries_categories_and_period() -> None:
-    query = build_search_query(
-        ['all:"large language model"', "ti:LLM AND abs:agents"],
-        ["cs.CL", "cs.AI"],
-        START,
-        END,
-    )
-
-    assert query == (
-        '((all:"large language model") OR (ti:LLM AND abs:agents))'
-        " AND (cat:cs.CL OR cat:cs.AI)"
-        " AND submittedDate:[202410050000 TO 202410052359]"
-    )
-
-
-def test_query_without_categories() -> None:
-    query = build_search_query(['all:"diffusion model"'], [], START, END)
-
-    assert query == '((all:"diffusion model")) AND submittedDate:[202410050000 TO 202410052359]'
-
-
-def test_query_converts_period_to_utc() -> None:
-    from zoneinfo import ZoneInfo
-
-    moscow = ZoneInfo("Europe/Moscow")
-    query = build_search_query(
-        ["all:LLM"],
-        [],
-        datetime(2024, 10, 5, 3, 0, tzinfo=moscow),
-        datetime(2024, 10, 6, 2, 59, tzinfo=moscow),
-    )
-
-    assert "submittedDate:[202410050000 TO 202410052359]" in query
-
-
-def test_query_requires_queries() -> None:
-    with pytest.raises(ArxivError):
-        build_search_query(["  "], ["cs.CL"], START, END)
 
 
 # --- парсинг Atom ---
