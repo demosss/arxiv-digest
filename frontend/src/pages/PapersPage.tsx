@@ -4,6 +4,7 @@ import {
   Anchor,
   Badge,
   Button,
+  Code,
   Divider,
   Drawer,
   Group,
@@ -182,16 +183,29 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
 
           <Field label="Темы">
             {paper.topics.length ? (
-              <Stack gap={4}>
+              <Stack gap="xs">
                 {paper.topics.map((topic) => (
-                  <Text key={topic.id} size="sm">
-                    <Text span fw={600} inherit>
+                  <div key={topic.id}>
+                    <Text size="sm" fw={600}>
                       {topic.name}
                     </Text>
-                    {topic.matched_keywords.length
-                      ? ` — совпало: ${topic.matched_keywords.join(', ')}`
-                      : ''}
-                  </Text>
+                    {topic.matched_queries.length ? (
+                      <Stack gap={4} mt={4}>
+                        <Text size="xs" c="dimmed">
+                          Найдена запросами:
+                        </Text>
+                        {topic.matched_queries.map((query) => (
+                          <Code key={query} block fz={12} style={{ whiteSpace: 'pre-wrap' }}>
+                            {query}
+                          </Code>
+                        ))}
+                      </Stack>
+                    ) : topic.matched_keywords.length ? (
+                      <Text size="xs" c="dimmed">
+                        Совпавшие ключевые слова: {topic.matched_keywords.join(', ')}
+                      </Text>
+                    ) : null}
+                  </div>
                 ))}
               </Stack>
             ) : (

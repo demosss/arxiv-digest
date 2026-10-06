@@ -12,7 +12,7 @@ export interface DeletedCount {
 }
 
 export interface ApiErrorBody {
-  detail: string | { loc: (string | number)[]; msg: string; type?: string }[];
+  detail: string | { loc: (string | number)[]; msg: string; type?: string; position?: number }[];
   code: string;
 }
 
@@ -54,9 +54,72 @@ export interface Topic {
 
 export interface TopicInput {
   name: string;
+  description: string | null;
   queries: string[];
   arxiv_categories: string[];
   is_active: boolean;
+}
+
+/** Замечание к поисковому запросу; position — индекс символа (с нуля) в нормализованной строке. */
+export interface QueryIssue {
+  position: number;
+  message: string;
+}
+
+export interface QueryValidation {
+  normalized: string;
+  errors: QueryIssue[];
+  warnings: QueryIssue[];
+}
+
+export interface TopicPreviewInput {
+  queries: string[];
+  categories: string[];
+  days: number;
+}
+
+export interface PreviewExample {
+  arxiv_id: string;
+  title: string;
+  published_at: string;
+  abs_url: string;
+}
+
+export interface PreviewQueryResult {
+  query: string;
+  total: number;
+  examples: PreviewExample[];
+  error: string | null;
+}
+
+export interface TopicPreview {
+  days: number;
+  period_start: string;
+  period_end: string;
+  queries: PreviewQueryResult[];
+  unique_total: number;
+  unique_is_lower_bound: boolean;
+}
+
+export type TopicImportMode = 'merge' | 'replace';
+
+export interface ImportIssue {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  position?: number | null;
+  topic?: string | null;
+}
+
+export interface TopicImportReport {
+  mode: TopicImportMode;
+  dry_run: boolean;
+  applied: boolean;
+  created: string[];
+  updated: string[];
+  unchanged: string[];
+  deleted: string[];
+  errors: ImportIssue[];
 }
 
 export interface Recipient {

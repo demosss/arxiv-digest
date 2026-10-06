@@ -14,6 +14,7 @@ import type {
   PaperDetail,
   PaperStatus,
   PublicSettings,
+  QueryValidation,
   Recipient,
   RecipientInput,
   Run,
@@ -28,7 +29,11 @@ import type {
   TaskType,
   TokenResponse,
   Topic,
+  TopicImportMode,
+  TopicImportReport,
   TopicInput,
+  TopicPreview,
+  TopicPreviewInput,
   User,
 } from './types';
 
@@ -44,6 +49,18 @@ function clean<T extends object>(params: T): Partial<T> {
       ([, value]) => value !== undefined && value !== null && value !== '',
     ),
   ) as Partial<T>;
+}
+
+/** Отдаёт браузеру полученный через axios файл (запросы идут с заголовком Authorization). */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 // --- Авторизация и настройки ---
@@ -74,6 +91,27 @@ export const updateTopic = (id: number, data: Partial<TopicInput>) =>
   api.patch<Topic>(`/topics/${id}`, data).then((r) => r.data);
 
 export const deleteTopic = (id: number) => api.delete<void>(`/topics/${id}`).then(() => undefined);
+
+export const validateTopicQuery = (query: string) =>
+  api.post<QueryValidation>('/topics/validate-query', { query }).then((r) => r.data);
+
+/** Запросы выполняются на arXiv по одному с паузами, поэтому таймаут большой. */
+export const previewTopic = (data: TopicPreviewInput) =>
+  api.post<TopicPreview>('/topics/preview', data, { timeout: 300_000 }).then((r) => r.data);
+
+export async function exportTopicsYaml(): Promise<void> {
+  const response = await api.get<Blob>('/topics/export', { responseType: 'blob' });
+  saveBlob(response.data, 'topics.yaml');
+}
+
+/** С dryRun сервер только показывает изменения и ошибки; без него ошибка в файле — ответ 422. */
+export function importTopicsYaml(file: File, mode: TopicImportMode, dryRun: boolean) {
+  const form = new FormData();
+  form.append('file', file);
+  return api
+    .post<TopicImportReport>('/topics/import', form, { params: { mode, dry_run: dryRun } })
+    .then((r) => r.data);
+}
 
 // --- Получатели ---
 
@@ -193,12 +231,5 @@ export const clearDigests = (filters: { status?: DigestStatus }) =>
 /** PDF скачивается через axios (нужен заголовок Authorization) и отдаётся браузеру как файл. */
 export async function downloadDigestPdf(digest: Digest): Promise<void> {
   const response = await api.get<Blob>(`/digests/${digest.id}/pdf`, { responseType: 'blob' });
-  const url = URL.createObjectURL(response.data);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = digest.filename ?? `digest_${digest.id}.pdf`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  saveBlob(response.data, digest.filename ?? `digest_${digest.id}.pdf`);
 }
