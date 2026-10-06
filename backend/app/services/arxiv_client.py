@@ -202,6 +202,10 @@ class ArxivClient:
         log.info("arxiv_page", query=query, start=start, received=len(entries), total=total)
         return entries, total
 
+    def search_page(self, query: str, max_results: int) -> tuple[list[ArxivEntry], int]:
+        """Первая страница выдачи и общее число результатов (`totalResults`)."""
+        return self._fetch_page(query, 0, min(PAGE_SIZE, max_results))
+
     def search(self, query: str, max_results: int) -> list[ArxivEntry]:
         """Все результаты запроса (не больше `max_results`), постранично по PAGE_SIZE."""
         results: list[ArxivEntry] = []

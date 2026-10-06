@@ -2,13 +2,14 @@
 
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.db import get_sync_sessionmaker
 from app.core.logging import configure_logging, get_logger
 from app.core.security import hash_password
-from app.models import AdminUser
+from app.models import AdminUser, Topic
+from app.services.topics_io import apply_plan, parse_topics_yaml, plan_import
 
 log = get_logger(__name__)
 
@@ -40,12 +41,43 @@ def ensure_admin() -> bool:
     return True
 
 
+def seed_topics() -> int:
+    """Импортирует темы из seed-файла, если таблица topics пуста. Возвращает число тем."""
+    path = get_settings().seed_topics_path
+    with get_sync_sessionmaker()() as session:
+        if session.scalar(select(func.count()).select_from(Topic)):
+            return 0
+        if not path.is_file():
+            log.info("seed_topics_skipped", path=str(path), reason="file_not_found")
+            return 0
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            log.error("seed_topics_failed", path=str(path), error=str(exc))
+            return 0
+        items, issues = parse_topics_yaml(text)
+        if issues:
+            # ошибка в seed-файле не должна мешать старту сервиса
+            log.error(
+                "seed_topics_invalid",
+                path=str(path),
+                errors=[f"{'.'.join(map(str, i.loc))}: {i.msg}" for i in issues],
+            )
+            return 0
+        topics = apply_plan(plan_import([], items, "merge"))
+        session.add_all(topics)
+        session.commit()
+    log.info("topics_seeded", path=str(path), topics=len(topics))
+    return len(topics)
+
+
 def main(argv: list[str]) -> int:
     configure_logging("api")
     command = argv[1] if len(argv) > 1 else ""
     if command == "init":
         ensure_data_dirs()
         ensure_admin()
+        seed_topics()
         return 0
     print("usage: python -m app.cli init", file=sys.stderr)
     return 2

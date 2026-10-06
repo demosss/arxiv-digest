@@ -20,6 +20,7 @@ _STATUS_CODES = {
     405: "method_not_allowed",
     409: "conflict",
     422: "validation_error",
+    429: "too_many_requests",
     503: "service_unavailable",
 }
 
@@ -63,6 +64,20 @@ class BadRequestError(AppError):
         super().__init__(status.HTTP_400_BAD_REQUEST, code, detail)
 
 
+class TooManyRequestsError(AppError):
+    def __init__(self, detail: str, code: str = "too_many_requests") -> None:
+        super().__init__(status.HTTP_429_TOO_MANY_REQUESTS, code, detail)
+
+
+def _validation_item(err: Any) -> dict[str, Any]:
+    # input и ctx не возвращаем: в них может оказаться присланный пароль
+    item = {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type")}
+    if err.get("type") == "invalid_query":
+        # ошибка поискового запроса темы: позиция в нормализованной строке
+        item["position"] = (err.get("ctx") or {}).get("position")
+    return item
+
+
 def _error(
     status_code: int, detail: Any, code: str, headers: dict[str, str] | None = None
 ) -> JSONResponse:
@@ -88,12 +103,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        # input и ctx не возвращаем: в них может оказаться присланный пароль
-        errors = [
-            {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type")}
-            for err in exc.errors()
-        ]
-        return _error(422, errors, "validation_error")
+        return _error(422, [_validation_item(err) for err in exc.errors()], "validation_error")
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:

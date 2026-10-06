@@ -66,6 +66,8 @@ class Settings(BaseSettings):
 
     # --- Хранилище ---
     data_dir: Path = Path("/data")
+    # темы для первого запуска: импортируются, если таблица topics пуста
+    seed_topics_path: Path = Path("/seed/seed_topics.yaml")
 
     def _database_url(self, driver: str) -> URL:
         return URL.create(

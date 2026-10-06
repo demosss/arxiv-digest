@@ -71,6 +71,10 @@ class FakeSource:
                 return entries[:max_results]
         return []
 
+    def search_page(self, query: str, max_results: int) -> tuple[list[ArxivEntry], int]:
+        entries = self.search(query, 10_000)
+        return entries[:max_results], len(entries)
+
     def download_pdf(self, url: str, destination: Path) -> int:
         self.downloads.append(url)
         if any(arxiv_id in url for arxiv_id in self.failing_ids):
