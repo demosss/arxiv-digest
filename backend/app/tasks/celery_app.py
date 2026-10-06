@@ -34,6 +34,7 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     worker_hijack_root_logger=False,
     worker_redirect_stdouts=False,
+    imports=("app.tasks.pipeline",),
 )
 
 
