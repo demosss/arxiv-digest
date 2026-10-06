@@ -7,7 +7,7 @@
 import json
 import logging
 import sys
-import time
+import threading
 import traceback
 from datetime import UTC, datetime
 from typing import Any
@@ -59,20 +59,33 @@ class TaskLogHandler(logging.Handler):
         super().__init__(level)
         self._run_id = run_id
         self._buffer: list[dict[str, Any]] = []
-        self._last_flush = time.monotonic()
+        self._buffer_lock = threading.Lock()
+        self._flush_lock = threading.Lock()
+        self._flush_owner: threading.Thread | None = None
         self._flushing = False
+        self._closed = threading.Event()
         self._masker = SecretMasker(get_settings().secret_values())
+        # фоновый сброс: записи появляются в БД, даже если задача надолго замолчала
+        # (например, ждёт ответа LLM), и просмотр логов в UI не отстаёт
+        self._flusher = threading.Thread(
+            target=self._flush_periodically, name=f"task-log-flusher-{run_id}", daemon=True
+        )
+        self._flusher.start()
+
+    def _flush_periodically(self) -> None:
+        while not self._closed.wait(FLUSH_INTERVAL_SECONDS):
+            self.flush()
 
     def emit(self, record: logging.LogRecord) -> None:
         # записи, порождённые самой вставкой в БД, игнорируются, чтобы не уйти в рекурсию
-        if self._flushing:
+        if self._flushing and threading.current_thread() is self._flush_owner:
             return
         try:
-            self._buffer.append(self._to_row(record))
-            if (
-                len(self._buffer) >= BATCH_SIZE
-                or time.monotonic() - self._last_flush >= FLUSH_INTERVAL_SECONDS
-            ):
+            row = self._to_row(record)
+            with self._buffer_lock:
+                self._buffer.append(row)
+                full = len(self._buffer) >= BATCH_SIZE
+            if full:
                 self.flush()
         except Exception as exc:
             self._report(exc)
@@ -102,20 +115,25 @@ class TaskLogHandler(logging.Handler):
         }
 
     def flush(self) -> None:
-        if self._flushing or not self._buffer:
-            return
-        rows, self._buffer = self._buffer, []
-        self._last_flush = time.monotonic()
-        self._flushing = True
-        try:
-            with get_sync_engine().begin() as connection:
-                connection.execute(insert(TaskLog), rows)
-        except Exception as exc:
-            self._report(exc, lost=len(rows))
-        finally:
-            self._flushing = False
+        with self._buffer_lock:
+            if not self._buffer:
+                return
+            rows, self._buffer = self._buffer, []
+        with self._flush_lock:
+            self._flush_owner = threading.current_thread()
+            self._flushing = True
+            try:
+                with get_sync_engine().begin() as connection:
+                    connection.execute(insert(TaskLog), rows)
+            except Exception as exc:
+                self._report(exc, lost=len(rows))
+            finally:
+                self._flushing = False
+                self._flush_owner = None
 
     def close(self) -> None:
+        self._closed.set()
+        self._flusher.join(timeout=5)
         self.flush()
         super().close()
 
