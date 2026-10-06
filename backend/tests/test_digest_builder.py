@@ -345,3 +345,45 @@ async def test_digests_api(
     assert missing.status_code == 404
     assert (await auth_client.get(f"/api/digests/{digest_id}")).json()["has_pdf"] is False
     assert (await auth_client.get("/api/digests/999999")).status_code == 404
+
+
+async def test_delete_digest_removes_pdf_and_keeps_papers(
+    auth_client: AsyncClient, db: Session, tmp_path: Path, topics: tuple[Topic, Topic]
+) -> None:
+    paper = _summarized(db, "2410.00001", "Agents That Plan", [topics[0]])
+    built = build_digest(
+        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+    )
+    digest_id = built.digest.id
+    run = runs.create_run(db, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL)
+    db.commit()
+
+    busy = await auth_client.delete(f"/api/digests/{digest_id}")
+    assert busy.status_code == 409
+    assert busy.json()["code"] == "runs_active"
+    runs.finish_run(db, run, RunStatus.SUCCESS)
+
+    assert (await auth_client.delete(f"/api/digests/{digest_id}")).status_code == 204
+
+    assert not built.pdf_path.exists()
+    assert (await auth_client.get("/api/digests")).json()["total"] == 0
+    assert (await auth_client.get(f"/api/papers/{paper.id}")).status_code == 200
+    assert (await auth_client.delete(f"/api/digests/{digest_id}")).status_code == 404
+
+
+async def test_clear_digests_respects_filters(
+    auth_client: AsyncClient, db: Session, tmp_path: Path
+) -> None:
+    empty = build_digest(
+        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+    )
+    assert empty.pdf_path.is_file()
+
+    other_status = await auth_client.delete("/api/digests", params={"status": "sent"})
+    assert other_status.status_code == 200
+    assert other_status.json() == {"deleted": 0}
+    assert empty.pdf_path.is_file()
+
+    assert (await auth_client.delete("/api/digests")).json() == {"deleted": 1}
+    assert not empty.pdf_path.exists()
+    assert (await auth_client.get("/api/digests")).json()["total"] == 0

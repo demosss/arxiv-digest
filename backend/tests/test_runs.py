@@ -504,3 +504,42 @@ async def test_cancel_run(
     again = await auth_client.post(f"/api/runs/{steps[0].id}/cancel")
     assert again.status_code == 409
     assert again.json()["code"] == "run_not_active"
+
+
+async def test_delete_run_removes_steps_and_logs(auth_client: AsyncClient, db: Session) -> None:
+    parent, steps = _pipeline(db)
+    db.add(TaskLog(run_id=steps[0].id, level="info", logger="app", message="collect_started"))
+    db.commit()
+
+    active = await auth_client.delete(f"/api/runs/{parent.id}")
+    assert active.status_code == 409
+    assert active.json()["code"] == "run_active"
+
+    for step in steps:
+        runs.finish_run(db, step, RunStatus.SUCCESS)
+
+    parent_id = parent.id
+    assert (await auth_client.delete(f"/api/runs/{parent_id}")).status_code == 204
+    db.expire_all()
+    assert db.scalars(select(TaskRun)).all() == []
+    assert db.scalars(select(TaskLog)).all() == []
+    assert (await auth_client.delete(f"/api/runs/{parent_id}")).status_code == 404
+
+
+async def test_clear_runs_respects_filters_and_keeps_active(
+    auth_client: AsyncClient, db: Session
+) -> None:
+    active_pipeline, _ = _pipeline(db)
+    failed, done, queued = _run(db), _run(db), _run(db)
+    runs.finish_run(db, failed, RunStatus.FAILED, error="boom")
+    runs.finish_run(db, done, RunStatus.SUCCESS)
+
+    only_failed = await auth_client.delete("/api/runs", params={"status": "failed"})
+    assert only_failed.status_code == 200
+    assert only_failed.json() == {"deleted": 1}
+
+    assert (await auth_client.delete("/api/runs")).json() == {"deleted": 1}
+
+    remaining = (await auth_client.get("/api/runs")).json()
+    assert [r["id"] for r in remaining["items"]] == [queued.id, active_pipeline.id]
+    assert (await auth_client.get(f"/api/runs/{active_pipeline.id}")).json()["children"]

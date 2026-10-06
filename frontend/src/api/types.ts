@@ -7,6 +7,10 @@ export interface Page<T> {
   offset: number;
 }
 
+export interface DeletedCount {
+  deleted: number;
+}
+
 export interface ApiErrorBody {
   detail: string | { loc: (string | number)[]; msg: string; type?: string }[];
   code: string;

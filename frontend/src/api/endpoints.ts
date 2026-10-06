@@ -2,6 +2,7 @@ import { api } from './client';
 import type {
   CronValidation,
   Dashboard,
+  DeletedCount,
   Digest,
   DigestDetail,
   DigestStatus,
@@ -140,6 +141,12 @@ export const cancelRun = (id: number) =>
     .post<{ run: RunDetail; cancelled_run_ids: number[] }>(`/runs/${id}/cancel`)
     .then((r) => r.data);
 
+export const deleteRun = (id: number) => api.delete<void>(`/runs/${id}`).then(() => undefined);
+
+/** Удаляет завершённые запуски под фильтрами; активные остаются. */
+export const clearRuns = (filters: RunFilters) =>
+  api.delete<DeletedCount>('/runs', { params: clean(filters) }).then((r) => r.data);
+
 export const getRunLogs = (id: number, params: { level?: LogLevel; limit?: number }) =>
   api.get<LogPage>(`/runs/${id}/logs`, { params: clean(params) }).then((r) => r.data);
 
@@ -161,6 +168,11 @@ export const getPaper = (id: number) => api.get<PaperDetail>(`/papers/${id}`).th
 export const resummarizePaper = (id: number) =>
   api.post<RunDetail>(`/papers/${id}/resummarize`).then((r) => r.data);
 
+export const deletePaper = (id: number) => api.delete<void>(`/papers/${id}`).then(() => undefined);
+
+export const clearPapers = (filters: PaperFilters) =>
+  api.delete<DeletedCount>('/papers', { params: clean(filters) }).then((r) => r.data);
+
 // --- Дайджесты ---
 
 export const listDigests = (params: PageParams & { status?: DigestStatus }) =>
@@ -171,6 +183,12 @@ export const getDigest = (id: number) =>
 
 export const resendDigest = (id: number, force: boolean) =>
   api.post<RunDetail>(`/digests/${id}/resend`, { force }).then((r) => r.data);
+
+export const deleteDigest = (id: number) =>
+  api.delete<void>(`/digests/${id}`).then(() => undefined);
+
+export const clearDigests = (filters: { status?: DigestStatus }) =>
+  api.delete<DeletedCount>('/digests', { params: clean(filters) }).then((r) => r.data);
 
 /** PDF скачивается через axios (нужен заголовок Authorization) и отдаётся браузеру как файл. */
 export async function downloadDigestPdf(digest: Digest): Promise<void> {

@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -17,25 +18,28 @@ import {
 } from '@mantine/core';
 import { DatePickerInput, type DatesRangeValue } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
-import { IconExternalLink, IconRefresh, IconSearch } from '@tabler/icons-react';
+import { IconExternalLink, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
+  clearPapers,
+  deletePaper,
   getPaper,
   listPapers,
   listTopics,
   resummarizePaper,
   type PaperFilters,
 } from '../api/endpoints';
-import type { PaperStatus } from '../api/types';
+import type { Paper, PaperStatus } from '../api/types';
 import { PaperStatusBadge } from '../components/Badges';
 import {
   Field,
   PageHeader,
   QueryState,
   TablePagination,
+  confirmDelete,
   usePagination,
 } from '../components/common';
 import { formatDuration } from '../lib/dates';
@@ -259,9 +263,50 @@ export function PapersPage() {
 
   const resetPage = () => pagination.setPage(1);
 
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['papers'] });
+    void queryClient.invalidateQueries({ queryKey: ['digests'] });
+    void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+  const remove = useMutation({
+    mutationFn: (paper: Paper) => deletePaper(paper.id),
+    onSuccess: (_, paper) => {
+      if (selected === paper.id) setSelected(null);
+      invalidate();
+      notifySuccess('Статья удалена');
+    },
+  });
+  const clear = useMutation({
+    mutationFn: () => clearPapers(filters),
+    onSuccess: ({ deleted }) => {
+      setSelected(null);
+      resetPage();
+      invalidate();
+      notifySuccess(`Удалено статей: ${deleted}`);
+    },
+  });
+  const hasFilters = Object.values(filters).some((value) => value !== undefined);
+
   return (
     <>
-      <PageHeader title="Статьи" />
+      <PageHeader title="Статьи">
+        <Button
+          color="red"
+          variant="light"
+          leftSection={<IconTrash size={16} />}
+          loading={clear.isPending}
+          disabled={!data?.total}
+          onClick={() =>
+            confirmDelete(
+              `${hasFilters ? 'статьи под текущими фильтрами' : 'все статьи'} (${data?.total ?? 0}) вместе с резюме и PDF-файлами`,
+              () => clear.mutate(),
+            )
+          }
+        >
+          Очистить
+        </Button>
+      </PageHeader>
 
       <Group mb="md" align="flex-end" wrap="wrap">
         <TextInput
@@ -332,6 +377,7 @@ export function PapersPage() {
               <Table.Th>Темы</Table.Th>
               <Table.Th>Опубликована</Table.Th>
               <Table.Th>Статус</Table.Th>
+              <Table.Th w={50} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -362,6 +408,19 @@ export function PapersPage() {
                 <Table.Td>{fmt.date(paper.published_at)}</Table.Td>
                 <Table.Td>
                   <PaperStatusBadge status={paper.status} />
+                </Table.Td>
+                <Table.Td>
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    aria-label="Удалить"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      confirmDelete(`статью arXiv:${paper.arxiv_id}`, () => remove.mutate(paper));
+                    }}
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
                 </Table.Td>
               </Table.Tr>
             ))}

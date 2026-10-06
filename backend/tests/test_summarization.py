@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -329,3 +330,55 @@ async def test_llm_health_endpoint(
 
     del auth_client.headers["Authorization"]
     assert (await client.get("/api/llm/health")).status_code == 401
+
+
+async def test_delete_paper_removes_summary_and_pdf(
+    auth_client: AsyncClient, db: Session, tmp_path: Path
+) -> None:
+    paper = make_paper(db, "2410.00001", PaperStatus.SUMMARIZED)
+    pdf = tmp_path / "2410.00001.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    paper.pdf_path = str(pdf)
+    db.add(Summary(paper_id=paper.id, text_ru=RUSSIAN_SUMMARY, model="fake-model"))
+    db.commit()
+
+    paper_id = paper.id
+    assert (await auth_client.delete(f"/api/papers/{paper_id}")).status_code == 204
+
+    db.expire_all()
+    assert db.scalars(select(Paper)).all() == []
+    assert db.scalars(select(Summary)).all() == []
+    assert not pdf.exists()
+    assert (await auth_client.delete(f"/api/papers/{paper_id}")).status_code == 404
+
+
+async def test_clear_papers_respects_filters(auth_client: AsyncClient, db: Session) -> None:
+    make_paper(db, "2410.00001", PaperStatus.SUMMARIZED)
+    make_paper(db, "2410.00002", PaperStatus.FAILED, text=None)
+    kept = make_paper(db, "2410.00003")
+
+    by_status = await auth_client.delete("/api/papers", params={"status": "failed"})
+    assert by_status.status_code == 200
+    assert by_status.json() == {"deleted": 1}
+    by_query = await auth_client.delete("/api/papers", params={"q": "2410.00001"})
+    assert by_query.json() == {"deleted": 1}
+    assert [p["id"] for p in (await auth_client.get("/api/papers")).json()["items"]] == [kept.id]
+
+    assert (await auth_client.delete("/api/papers")).json() == {"deleted": 1}
+    assert (await auth_client.get("/api/papers")).json()["total"] == 0
+
+
+async def test_papers_are_not_deleted_while_runs_are_active(
+    auth_client: AsyncClient, db: Session
+) -> None:
+    paper = make_paper(db, "2410.00001")
+    run = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    db.commit()
+
+    single = await auth_client.delete(f"/api/papers/{paper.id}")
+    assert single.status_code == 409
+    assert single.json()["code"] == "runs_active"
+    assert (await auth_client.delete("/api/papers")).status_code == 409
+
+    runs.finish_run(db, run, RunStatus.SUCCESS)
+    assert (await auth_client.delete(f"/api/papers/{paper.id}")).status_code == 204
