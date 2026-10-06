@@ -27,16 +27,26 @@ _STATUS_CODES = {
 class AppError(Exception):
     """Ошибка бизнес-логики с HTTP-статусом и машинным кодом."""
 
-    def __init__(self, status_code: int, code: str, detail: Any) -> None:
+    def __init__(
+        self, status_code: int, code: str, detail: Any, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(str(detail))
         self.status_code = status_code
         self.code = code
         self.detail = detail
+        self.headers = headers
 
 
 class NotFoundError(AppError):
     def __init__(self, detail: str = "Объект не найден") -> None:
         super().__init__(status.HTTP_404_NOT_FOUND, "not_found", detail)
+
+
+class UnauthorizedError(AppError):
+    def __init__(self, detail: str = "Требуется авторизация") -> None:
+        super().__init__(
+            status.HTTP_401_UNAUTHORIZED, "unauthorized", detail, {"WWW-Authenticate": "Bearer"}
+        )
 
 
 class ConflictError(AppError):
@@ -62,7 +72,7 @@ def _error(
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-        return _error(exc.status_code, exc.detail, exc.code)
+        return _error(exc.status_code, exc.detail, exc.code, exc.headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -79,7 +89,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             {"loc": list(err.get("loc", ())), "msg": err.get("msg", ""), "type": err.get("type")}
             for err in exc.errors()
         ]
-        return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, errors, "validation_error")
+        return _error(422, errors, "validation_error")
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:

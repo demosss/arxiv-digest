@@ -31,7 +31,7 @@ services:
       TZ: Europe/Moscow
       LOG_LEVEL: INFO
       LOG_FORMAT: json
-      SECRET_KEY: test-secret-key-0123456789
+      SECRET_KEY: test-secret-key-0123456789abcdef0123456789
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: test-admin-password
       POSTGRES_HOST: postgres-test

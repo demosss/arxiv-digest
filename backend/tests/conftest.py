@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Iterator
 
+import bcrypt
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -8,6 +9,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.db import Base, get_async_engine, get_sync_engine, get_sync_sessionmaker
+from app.core.security import create_access_token
+from app.models import AdminUser
+
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "correct-horse-battery"
+# минимальная стоимость bcrypt, чтобы тесты не тратили время на хеширование
+_ADMIN_HASH = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt(rounds=4)).decode()
 
 
 @pytest.fixture(scope="session")
@@ -33,9 +41,26 @@ def db(_migrated_db: None) -> Iterator[Session]:
 
 
 @pytest.fixture
+def admin(db: Session) -> AdminUser:
+    user = AdminUser(username=ADMIN_USERNAME, password_hash=_ADMIN_HASH)
+    db.add(user)
+    db.commit()
+    return user
+
+
+@pytest.fixture
 async def client(db: Session) -> AsyncIterator[AsyncClient]:
+    """Клиент без авторизации."""
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     await get_async_engine().dispose()
+
+
+@pytest.fixture
+async def auth_client(client: AsyncClient, admin: AdminUser) -> AsyncClient:
+    """Клиент с валидным JWT админа."""
+    token, _ = create_access_token(admin.username)
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
