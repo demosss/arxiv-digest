@@ -40,3 +40,7 @@ class DeliveryOut(ORMModel):
 class DigestDetail(DigestOut):
     papers: list[DigestPaperOut]
     deliveries: list[DeliveryOut]
+
+
+class DigestResendRequest(BaseModel):
+    force: bool = True

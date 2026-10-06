@@ -2,17 +2,27 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import PaginationDep, SessionDep, paginate
-from app.core.errors import NotFoundError
-from app.models import Digest, DigestPaper, DigestStatus, Topic
+from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
+from app.api.runs import launch_manual_run, load_run
+from app.core.errors import ConflictError, NotFoundError
+from app.models import Digest, DigestPaper, DigestStatus, TaskRun, TaskType, Topic
 from app.schemas.common import Page
-from app.schemas.digests import DeliveryOut, DigestDetail, DigestOut, DigestPaperOut
+from app.schemas.digests import (
+    DeliveryOut,
+    DigestDetail,
+    DigestOut,
+    DigestPaperOut,
+    DigestResendRequest,
+)
+from app.schemas.runs import RunDetail
+from app.services.audit import audit
 
 router = APIRouter(prefix="/digests", tags=["digests"])
 
@@ -119,3 +129,27 @@ async def download_digest_pdf(digest_id: int, session: SessionDep) -> FileRespon
     if pdf is None:
         raise NotFoundError("PDF-файл дайджеста не найден")
     return FileResponse(pdf, media_type="application/pdf", filename=pdf.name)
+
+
+@router.post("/{digest_id}/resend", response_model=RunDetail, status_code=status.HTTP_202_ACCEPTED)
+async def resend_digest(
+    digest_id: int,
+    session: SessionDep,
+    user: CurrentUser,
+    payload: DigestResendRequest | None = None,
+) -> TaskRun:
+    """Ставит в очередь повторную рассылку дайджеста.
+
+    По умолчанию письмо уходит всем активным получателям; с `force=false` — только тем,
+    кому дайджест ещё не доставлен.
+    """
+    digest = await session.get(Digest, digest_id)
+    if digest is None:
+        raise NotFoundError("Дайджест не найден")
+    if _pdf_file(digest) is None:
+        raise ConflictError("У дайджеста нет PDF-файла: соберите его заново", code="no_pdf")
+    force = payload.force if payload is not None else True
+    params = {"digest_id": digest.id, "force": force}
+    run_id = await run_in_threadpool(launch_manual_run, TaskType.SEND_DIGEST, params)
+    audit("resend", "digest", digest.id, user.username, run_id=run_id, force=force)
+    return await load_run(session, run_id)

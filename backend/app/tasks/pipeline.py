@@ -9,16 +9,17 @@ from celery import Task
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import TaskRun
+from app.models import RunStatus, TaskRun
 from app.services.arxiv_client import ArxivClient
 from app.services.collector import Collector
 from app.services.digest_builder import build_digest
 from app.services.llm_client import LLMClient
 from app.services.llm_summarizer import Summarizer
+from app.services.mailer import run_send_digest
 from app.services.periods import period_from_context, period_to_context
 from app.services.summarization import summarize_papers
 from app.tasks.base import Context, StepResult, execute_step
-from app.tasks.celery_app import QUEUE_DEFAULT, QUEUE_LLM, celery_app
+from app.tasks.celery_app import QUEUE_DEFAULT, QUEUE_LLM, QUEUE_MAIL, celery_app
 
 HOUR = 3600
 
@@ -71,6 +72,19 @@ def _build_digest(session: Session, run: TaskRun, context: Context) -> StepResul
     )
 
 
+def _send_digest(session: Session, run: TaskRun, context: Context) -> StepResult:
+    outcome = run_send_digest(
+        session,
+        get_settings(),
+        digest_id=context.get("digest_id"),
+        force=bool(context.get("force")),
+    )
+    stats = outcome.stats.as_dict() if outcome.stats else {}
+    if outcome.skip_reason:
+        return StepResult(stats=stats, status=RunStatus.SKIPPED, note=outcome.skip_reason)
+    return StepResult(stats=stats, context={"digest_id": outcome.digest_id})
+
+
 @celery_app.task(
     name="pipeline.collect",
     bind=True,
@@ -105,3 +119,15 @@ def summarize_task(self: Task, context: Context | None = None, *, run_id: int) -
 )
 def build_digest_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
     return execute_step(self, run_id, context, _build_digest)
+
+
+@celery_app.task(
+    name="pipeline.send_digest",
+    bind=True,
+    queue=QUEUE_MAIL,
+    acks_late=True,
+    soft_time_limit=HOUR,
+    time_limit=HOUR + 120,
+)
+def send_digest_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
+    return execute_step(self, run_id, context, _send_digest)

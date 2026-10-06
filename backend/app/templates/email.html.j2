@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ru">
+<body style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;">
+    <tr>
+      <td style="padding:24px 28px 8px;border-bottom:3px solid #1d4ed8;">
+        <h1 style="margin:0 0 6px;font-size:22px;line-height:1.25;">{{ subject }}</h1>
+        <p style="margin:0 0 12px;font-size:14px;color:#6b7280;">
+          {% if papers %}Статей в выпуске: {{ papers | length }}. Полные резюме — во вложенном PDF.{% else %}За этот период подходящих статей не нашлось.{% endif %}
+        </p>
+      </td>
+    </tr>
+    {% if papers %}
+    <tr>
+      <td style="padding:16px 28px 8px;">
+        <ol style="margin:0;padding-left:22px;font-size:14px;line-height:1.5;">
+          {% for paper in papers %}
+          <li style="margin-bottom:6px;"><a href="{{ paper.abs_url }}" style="color:#1d4ed8;text-decoration:none;">{{ paper.title }}</a></li>
+          {% endfor %}
+        </ol>
+      </td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td style="padding:12px 28px 24px;font-size:12px;color:#9ca3af;">
+        Письмо сформировано автоматически сервисом arXiv Digest.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

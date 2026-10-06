@@ -121,6 +121,8 @@ def execute_step(task: Task, run_id: int, context: Context | None, step: StepFn)
 
 
 def _fail(run_id: int, exc: BaseException, started: float) -> None:
+    # исключение шага может нести статистику того, что успели сделать до сбоя
+    stats = getattr(exc, "stats", None)
     message = str(exc) or type(exc).__name__
     log.error(
         "step_failed",
@@ -134,6 +136,7 @@ def _fail(run_id: int, exc: BaseException, started: float) -> None:
             session,
             session.get_one(TaskRun, run_id),
             RunStatus.FAILED,
+            stats=stats if isinstance(stats, dict) else None,
             error=message,
             traceback="".join(traceback.format_exception(exc)),
         )

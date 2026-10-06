@@ -41,3 +41,12 @@ class SmtpSettingsOut(Timestamps):
     timeout_seconds: int
     password_set: bool = Field(description="Задан ли SMTP_PASSWORD в окружении")
     is_configured: bool = Field(description="Заполнены ли host и from_email")
+
+
+class SmtpTestRequest(BaseModel):
+    to: EmailStr = Field(description="Адрес, на который отправить тестовое письмо")
+
+
+class SmtpTestResponse(BaseModel):
+    ok: bool
+    to: str
