@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.models import TaskRun
 from app.services.arxiv_client import ArxivClient
 from app.services.collector import Collector
+from app.services.digest_builder import build_digest
 from app.services.llm_client import LLMClient
 from app.services.llm_summarizer import Summarizer
 from app.services.periods import period_from_context, period_to_context
@@ -54,6 +55,22 @@ def _summarize(session: Session, run: TaskRun, context: Context) -> StepResult:
     return StepResult(stats=stats.as_dict())
 
 
+def _build_digest(session: Session, run: TaskRun, context: Context) -> StepResult:
+    settings = get_settings()
+    period_start, period_end = period_from_context(context)
+    built = build_digest(
+        session,
+        period_start,
+        period_end,
+        digests_dir=settings.digests_dir,
+        timezone=settings.tz,
+    )
+    return StepResult(
+        stats=built.stats(),
+        context={**period_to_context(period_start, period_end), "digest_id": built.digest.id},
+    )
+
+
 @celery_app.task(
     name="pipeline.collect",
     bind=True,
@@ -76,3 +93,15 @@ def collect_task(self: Task, context: Context | None = None, *, run_id: int) -> 
 )
 def summarize_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
     return execute_step(self, run_id, context, _summarize)
+
+
+@celery_app.task(
+    name="pipeline.build_digest",
+    bind=True,
+    queue=QUEUE_DEFAULT,
+    acks_late=True,
+    soft_time_limit=HOUR // 2,
+    time_limit=HOUR // 2 + 120,
+)
+def build_digest_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
+    return execute_step(self, run_id, context, _build_digest)

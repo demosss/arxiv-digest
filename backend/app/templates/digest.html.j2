@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>{{ title }} — {{ period_label }}</title>
+<style>
+  {# Шрифты с кириллицей подключаются по локальным путям: PDF не зависит от системных шрифтов #}
+  @font-face { font-family: "PT Serif"; font-weight: 400; font-style: normal; src: url("{{ fonts_url }}/PT_Serif-Web-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "PT Serif"; font-weight: 700; font-style: normal; src: url("{{ fonts_url }}/PT_Serif-Web-Bold.ttf") format("truetype"); }
+  @font-face { font-family: "PT Serif"; font-weight: 400; font-style: italic; src: url("{{ fonts_url }}/PT_Serif-Web-Italic.ttf") format("truetype"); }
+  @font-face { font-family: "PT Serif"; font-weight: 700; font-style: italic; src: url("{{ fonts_url }}/PT_Serif-Web-BoldItalic.ttf") format("truetype"); }
+  @font-face { font-family: "PT Sans"; font-weight: 400; font-style: normal; src: url("{{ fonts_url }}/PT_Sans-Web-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "PT Sans"; font-weight: 700; font-style: normal; src: url("{{ fonts_url }}/PT_Sans-Web-Bold.ttf") format("truetype"); }
+  @font-face { font-family: "PT Sans"; font-weight: 400; font-style: italic; src: url("{{ fonts_url }}/PT_Sans-Web-Italic.ttf") format("truetype"); }
+  @font-face { font-family: "PT Sans"; font-weight: 700; font-style: italic; src: url("{{ fonts_url }}/PT_Sans-Web-BoldItalic.ttf") format("truetype"); }
+
+  @page {
+    size: A4;
+    margin: 22mm 18mm 20mm 18mm;
+    @top-left { content: "{{ title }}"; font: 8.5pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; }
+    @top-right { content: "{{ period_label }}"; font: 8.5pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; }
+    @bottom-center { content: "Стр. " counter(page) " из " counter(pages); font: 8.5pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; }
+  }
+  @page :first {
+    @top-left { content: none; }
+    @top-right { content: none; }
+  }
+
+  html { font: 10.5pt/1.45 "PT Serif", "DejaVu Serif", "Noto Serif", serif; color: #111827; }
+  body { margin: 0; }
+  h1, h2, h3, .meta, .toc, .cover, .xref { font-family: "PT Sans", "DejaVu Sans", "Noto Sans", sans-serif; }
+  a { color: #1d4ed8; text-decoration: none; }
+
+  .cover { border-bottom: 2pt solid #1d4ed8; padding-bottom: 10pt; margin-bottom: 18pt; }
+  .cover h1 { font-size: 24pt; line-height: 1.15; margin: 0 0 8pt; }
+  .cover dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; column-gap: 10pt; row-gap: 2pt; font-size: 10.5pt; }
+  .cover dt { color: #6b7280; }
+  .cover dd { margin: 0; }
+
+  .toc h2 { font-size: 14pt; margin: 0 0 6pt; }
+  .toc ol { list-style: none; margin: 0; padding: 0; }
+  .toc li { margin: 2pt 0; font-size: 10.5pt; }
+  .toc li a { color: inherit; display: block; }
+  .toc li a::after { content: leader(".") " " target-counter(attr(href), page); color: #6b7280; }
+  .toc .count { color: #6b7280; }
+
+  section.topic { break-before: page; }
+  section.topic > h2 { font-size: 16pt; margin: 0 0 4pt; color: #1e3a8a; }
+  section.topic > .keywords { font: 9pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; margin: 0 0 12pt; }
+
+  article { margin: 0 0 16pt; padding-top: 8pt; border-top: 0.6pt solid #d1d5db; }
+  article h3 { font-size: 12pt; line-height: 1.25; margin: 0 0 4pt; break-after: avoid; }
+  article .meta { font-size: 9pt; color: #4b5563; margin: 0 0 6pt; break-after: avoid; }
+  article .meta span + span::before { content: " · "; }
+  article p.summary { margin: 0 0 5pt; text-align: justify; hyphens: auto; orphans: 2; widows: 2; }
+  article p.summary b { font-family: "PT Sans", "DejaVu Sans", sans-serif; }
+  article.xref { font-size: 9.5pt; color: #4b5563; padding-top: 5pt; margin-bottom: 8pt; }
+  article.xref .ref-title { color: #111827; }
+
+  .empty { font-size: 12pt; margin-top: 30pt; color: #4b5563; }
+</style>
+</head>
+<body>
+
+<header class="cover">
+  <h1>{{ title }}</h1>
+  <dl>
+    <dt>Период</dt><dd>{{ period_label }}</dd>
+    <dt>Сформирован</dt><dd>{{ generated_label }}</dd>
+    <dt>Статей</dt><dd>{{ papers_count }}</dd>
+  </dl>
+</header>
+
+{% if sections %}
+<nav class="toc">
+  <h2>Оглавление</h2>
+  <ol>
+    {% for section in sections %}
+    <li><a href="#{{ section.anchor }}">{{ section.name }} <span class="count">({{ section.papers_count }})</span></a></li>
+    {% endfor %}
+  </ol>
+</nav>
+
+{% for section in sections %}
+<section class="topic" id="{{ section.anchor }}">
+  <h2>{{ section.name }}</h2>
+  {% if section.keywords %}<p class="keywords">Ключевые слова: {{ section.keywords | join(", ") }}</p>{% endif %}
+
+  {% for item in section.items %}
+  {% if item.is_reference %}
+  <article class="xref">
+    <span class="ref-title">{{ item.title }}</span> —
+    см. в разделе <a href="#{{ item.anchor }}">«{{ item.primary_section }}»</a>
+  </article>
+  {% else %}
+  <article id="{{ item.anchor }}">
+    <h3><a href="{{ item.abs_url }}">{{ item.title }}</a></h3>
+    <p class="meta">
+      <span>{{ item.authors }}</span>
+      <span>{{ item.categories | join(", ") }}</span>
+      <span>{{ item.date }}</span>
+      <span>arXiv:{{ item.arxiv_id }}</span>
+    </p>
+    {% for label, text in item.summary %}
+    <p class="summary">{% if label %}<b>{{ label }}:</b> {% endif %}{{ text }}</p>
+    {% endfor %}
+  </article>
+  {% endif %}
+  {% endfor %}
+</section>
+{% endfor %}
+
+{% else %}
+<p class="empty">За выбранный период не найдено статей с готовыми резюме.</p>
+{% endif %}
+
+</body>
+</html>

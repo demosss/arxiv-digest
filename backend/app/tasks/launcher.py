@@ -11,13 +11,14 @@ from app.core.logging import get_logger
 from app.models import RunStatus, RunTrigger, TaskRun, TaskType
 from app.services import runs
 from app.tasks.celery_app import celery_app
-from app.tasks.pipeline import collect_task, summarize_task
+from app.tasks.pipeline import build_digest_task, collect_task, summarize_task
 
 log = get_logger(__name__)
 
 STEP_TASKS: dict[TaskType, Task] = {
     TaskType.COLLECT: collect_task,
     TaskType.SUMMARIZE: summarize_task,
+    TaskType.BUILD_DIGEST: build_digest_task,
 }
 
 
