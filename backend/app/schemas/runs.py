@@ -20,6 +20,9 @@ class RunCreate(BaseModel):
     digest_id: int | None = Field(default=None, description="Для send_digest: какой дайджест")
     paper_ids: list[int] | None = Field(default=None, description="Для summarize: какие статьи")
     force: bool = Field(default=False, description="Для send_digest: отправить повторно")
+    retry_failed: bool = Field(
+        default=False, description="Для summarize: взять и статьи, упавшие на суммаризации"
+    )
 
     @model_validator(mode="after")
     def check_period(self) -> "RunCreate":
@@ -41,6 +44,8 @@ class RunCreate(BaseModel):
             params["paper_ids"] = self.paper_ids
         if self.force:
             params["force"] = True
+        if self.retry_failed:
+            params["retry_failed"] = True
         return params
 
 

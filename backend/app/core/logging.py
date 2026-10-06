@@ -47,6 +47,17 @@ SENSITIVE_KEYS = frozenset(
     }
 )
 _SENSITIVE_SUFFIXES = ("password", "_secret", "_token", "api_key")
+_NOISY_LOGGERS = (
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "httpcore2",
+    "amqp",
+    "kombu",
+    "fontTools",
+    "weasyprint",
+    "openai",
+)
 _BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 
 
@@ -179,7 +190,7 @@ def configure_logging(service: str | None = None) -> None:
     access = logging.getLogger("uvicorn.access")
     access.handlers.clear()
     access.propagate = False
-    for name in ("httpx", "httpcore", "amqp", "kombu", "fontTools", "weasyprint", "openai"):
+    for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(max(root.level, logging.WARNING))
 
     if file_error:

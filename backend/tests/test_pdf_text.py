@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import fitz
+import pymupdf
 import pytest
 
 from app.services.pdf_text import (
@@ -126,11 +126,11 @@ def test_clean_text_cuts_references_after_joining_pages() -> None:
 
 
 def _make_pdf(path: Path, pages: list[str]) -> None:
-    document = fitz.open()
+    document = pymupdf.open()
     for index, body in enumerate(pages, start=1):
         page = document.new_page()
         page.insert_text((72, 40), "Preprint. Under review.", fontsize=9)
-        page.insert_textbox(fitz.Rect(72, 72, 520, 760), body, fontsize=10)
+        page.insert_textbox(pymupdf.Rect(72, 72, 520, 760), body, fontsize=10)
         page.insert_text((300, 800), str(index), fontsize=9)
     document.save(path)
     document.close()
@@ -160,7 +160,7 @@ def test_extract_text_from_real_pdf(tmp_path: Path) -> None:
 
 def test_extract_text_fails_on_pdf_without_text(tmp_path: Path) -> None:
     pdf = tmp_path / "scan.pdf"
-    document = fitz.open()
+    document = pymupdf.open()
     document.new_page()
     document.save(pdf)
     document.close()

@@ -21,7 +21,7 @@ from app.tasks import launcher
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-async def _load_run(session: AsyncSession, run_id: int) -> TaskRun:
+async def load_run(session: AsyncSession, run_id: int) -> TaskRun:
     run = await session.scalar(
         select(TaskRun)
         .where(TaskRun.id == run_id)
@@ -33,7 +33,7 @@ async def _load_run(session: AsyncSession, run_id: int) -> TaskRun:
     return run
 
 
-def _launch(task_type: TaskType, params: dict[str, Any]) -> int:
+def launch_manual_run(task_type: TaskType, params: dict[str, Any]) -> int:
     with get_sync_sessionmaker()() as session:
         run = launcher.launch_run(
             session, task_type=task_type, trigger=RunTrigger.MANUAL, params=params
@@ -95,21 +95,21 @@ async def list_runs(
 async def create_run(payload: RunCreate, session: SessionDep, user: CurrentUser) -> TaskRun:
     """Ручной запуск шага или всего пайплайна. Задача выполняется в фоне."""
     params = payload.to_params()
-    run_id = await run_in_threadpool(_launch, payload.task_type, params)
+    run_id = await run_in_threadpool(launch_manual_run, payload.task_type, params)
     audit("launch", "run", run_id, user.username, task_type=payload.task_type.value, params=params)
-    return await _load_run(session, run_id)
+    return await load_run(session, run_id)
 
 
 @router.get("/{run_id}", response_model=RunDetail)
 async def get_run(run_id: int, session: SessionDep) -> TaskRun:
-    return await _load_run(session, run_id)
+    return await load_run(session, run_id)
 
 
 @router.post("/{run_id}/cancel", response_model=RunCancelResponse)
 async def cancel_run(run_id: int, session: SessionDep, user: CurrentUser) -> RunCancelResponse:
     cancelled = await run_in_threadpool(_cancel, run_id)
     audit("cancel", "run", run_id, user.username, cancelled_run_ids=cancelled)
-    run = await _load_run(session, run_id)
+    run = await load_run(session, run_id)
     return RunCancelResponse(run=RunDetail.model_validate(run), cancelled_run_ids=cancelled)
 
 
@@ -125,7 +125,7 @@ async def get_run_logs(
     limit: LogLimit = 500,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> LogPage:
-    run = await _load_run(session, run_id)
+    run = await load_run(session, run_id)
     run_ids = [run.id]
     if include_steps:
         run_ids += [child.id for child in run.children]

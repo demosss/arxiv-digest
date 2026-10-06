@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 from app.services.arxiv_client import ArxivEntry, ArxivError
+from app.services.llm_client import LLMHealth, LLMResponse
 from app.services.pdf_text import ExtractedText
 
 PERIOD_START = datetime(2024, 10, 5, 0, 0, tzinfo=UTC)
@@ -29,10 +30,10 @@ def make_entry(arxiv_id: str, title: str = "", abstract: str = "") -> ArxivEntry
 
 
 def make_pdf(path: Path, pages: list[str] | None = None) -> None:
-    document = fitz.open()
+    document = pymupdf.open()
     for body in pages or [PARAGRAPH, PARAGRAPH]:
         page = document.new_page()
-        page.insert_textbox(fitz.Rect(72, 72, 520, 760), body, fontsize=10)
+        page.insert_textbox(pymupdf.Rect(72, 72, 520, 760), body, fontsize=10)
     path.parent.mkdir(parents=True, exist_ok=True)
     document.save(path)
     document.close()
@@ -69,3 +70,44 @@ class FakeSource:
             raise ArxivError(f"Скачивание PDF: HTTP 404 ({url})")
         make_pdf(destination)
         return destination.stat().st_size
+
+
+RUSSIAN_SUMMARY = (
+    "Задача: авторы исследуют, как большие языковые модели (large language models) "
+    "справляются с многошаговыми рассуждениями при ограниченном контексте.\n\n"
+    "Метод: предложен подход, в котором модель сначала строит план решения, а затем "
+    "последовательно выполняет его шаги, сверяясь с промежуточными результатами.\n\n"
+    "Результаты: на двенадцати наборах данных точность выросла на 7,5 процентных пункта "
+    "по сравнению с базовой моделью.\n\n"
+    "Значимость: работа показывает, что качество рассуждений можно повысить без дообучения."
+)
+RUSSIAN_NOTE = "Конспект фрагмента: описан метод планирования и результаты на 12 бенчмарках."
+
+
+class FakeLLM:
+    """Модель-заглушка: отдаёт заранее заданные ответы и запоминает все запросы."""
+
+    model = "fake-model"
+
+    def __init__(self, replies: list[str | Exception] | None = None) -> None:
+        self.replies = list(replies or [])
+        self.calls: list[dict[str, str]] = []
+
+    def complete(self, system: str, user: str, *, purpose: str) -> LLMResponse:
+        self.calls.append({"system": system, "user": user, "purpose": purpose})
+        if self.replies:
+            reply = self.replies.pop(0)
+        else:
+            reply = RUSSIAN_SUMMARY if purpose in ("summary", "reduce") else RUSSIAN_NOTE
+        if isinstance(reply, Exception):
+            raise reply
+        return LLMResponse(
+            text=reply,
+            prompt_tokens=100,
+            completion_tokens=40,
+            duration_ms=250,
+            finish_reason="stop",
+        )
+
+    def health(self) -> LLMHealth:
+        return LLMHealth(ok=True, base_url="http://llm.test/v1", model=self.model, latency_ms=5)

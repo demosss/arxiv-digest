@@ -58,7 +58,7 @@ warn_redundant_casts = true
 exclude = ["alembic/versions"]
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "kombu.*", "feedparser.*", "fitz.*", "pymupdf.*", "weasyprint.*"]
+module = ["celery.*", "kombu.*", "feedparser.*", "pymupdf.*", "weasyprint.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

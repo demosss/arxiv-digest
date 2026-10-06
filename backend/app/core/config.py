@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote
 
 from pydantic import Field, SecretStr, ValidationError
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     llm_context_chars: int = Field(default=24000, ge=1000)
     llm_timeout_seconds: float = Field(default=300, gt=0)
     llm_concurrency: int = Field(default=1, ge=1)
+    llm_extra_body: dict[str, Any] = Field(default_factory=dict)
 
     # --- SMTP: из окружения берётся только пароль ---
     smtp_password: SecretStr | None = None

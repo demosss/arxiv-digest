@@ -9,9 +9,13 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.db import get_async_sessionmaker
 from app.core.logging import get_logger
+from app.schemas.papers import LLMHealthOut
+from app.services.llm_client import LLMClient
 
 log = get_logger(__name__)
 router = APIRouter(tags=["health"])
+# требует авторизации, в отличие от /health
+llm_router = APIRouter(tags=["health"])
 
 RABBITMQ_CONNECT_TIMEOUT = 3
 
@@ -59,3 +63,22 @@ async def health(response: Response) -> HealthResponse:
     if not healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return HealthResponse(status="ok" if healthy else "degraded", db=db, rabbitmq=rabbitmq)
+
+
+def check_llm() -> LLMHealthOut:
+    result = LLMClient.from_settings(get_settings()).health()
+    return LLMHealthOut(
+        ok=result.ok,
+        base_url=result.base_url,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        model_available=result.model_available,
+        models=result.models,
+        error=result.error,
+    )
+
+
+@llm_router.get("/llm/health", response_model=LLMHealthOut)
+async def llm_health() -> LLMHealthOut:
+    """Доступность локальной модели: список моделей сервера или короткий тестовый запрос."""
+    return await asyncio.to_thread(check_llm)

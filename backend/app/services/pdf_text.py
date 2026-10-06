@@ -6,7 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 from app.core.logging import get_logger
 
@@ -109,7 +109,7 @@ def clean_text(pages: list[str]) -> str:
 def extract_pages(pdf_path: Path) -> list[str]:
     """Текст по страницам; блоки PyMuPDF (абзацы) разделены пустой строкой."""
     try:
-        with fitz.open(pdf_path) as document:
+        with pymupdf.open(pdf_path) as document:
             pages: list[str] = []
             for page in document:
                 blocks = page.get_text("blocks", sort=True)
