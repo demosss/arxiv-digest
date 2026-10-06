@@ -1,0 +1,115 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="Eslint" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="PyInterpreterInspection" enabled="false" level="WARNING" enabled_by_default="false" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="INFORMATION" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="alembic" />
+          <option value="anitya_schema" />
+          <option value="annotated-types" />
+          <option value="anyio" />
+          <option value="asyncpg" />
+          <option value="attrs" />
+          <option value="authx" />
+          <option value="Automat" />
+          <option value="bcrypt" />
+          <option value="black" />
+          <option value="blinker" />
+          <option value="certifi" />
+          <option value="cffi" />
+          <option value="charset-normalizer" />
+          <option value="click" />
+          <option value="colorama" />
+          <option value="constantly" />
+          <option value="crochet" />
+          <option value="cryptography" />
+          <option value="decorator" />
+          <option value="defusedxml" />
+          <option value="ecdsa" />
+          <option value="fastapi" />
+          <option value="fedora-messaging-the-new-hotness-schema" />
+          <option value="fedora_messaging" />
+          <option value="greenlet" />
+          <option value="gssapi" />
+          <option value="h11" />
+          <option value="httptools" />
+          <option value="hyperlink" />
+          <option value="idna" />
+          <option value="incremental" />
+          <option value="itsdangerous" />
+          <option value="jsonschema" />
+          <option value="jsonschema-specifications" />
+          <option value="koji" />
+          <option value="Mako" />
+          <option value="MarkupSafe" />
+          <option value="mypy_extensions" />
+          <option value="Naked" />
+          <option value="packaging" />
+          <option value="passlib" />
+          <option value="pathspec" />
+          <option value="pika" />
+          <option value="platformdirs" />
+          <option value="pyaes" />
+          <option value="pyasn1" />
+          <option value="pyasn1_modules" />
+          <option value="pycparser" />
+          <option value="pydantic" />
+          <option value="pydantic-settings" />
+          <option value="pydantic_core" />
+          <option value="PyJWT" />
+          <option value="pyOpenSSL" />
+          <option value="python-bugzilla" />
+          <option value="python-dateutil" />
+          <option value="python-dotenv" />
+          <option value="python-jose" />
+          <option value="python-slugify" />
+          <option value="pytz" />
+          <option value="PyYAML" />
+          <option value="redis" />
+          <option value="referencing" />
+          <option value="requests" />
+          <option value="requests-gssapi" />
+          <option value="rpds-py" />
+          <option value="rsa" />
+          <option value="service-identity" />
+          <option value="setuptools" />
+          <option value="six" />
+          <option value="sniffio" />
+          <option value="SQLAlchemy" />
+          <option value="starlette" />
+          <option value="status" />
+          <option value="Telethon" />
+          <option value="text-unidecode" />
+          <option value="the-new-hotness" />
+          <option value="tomli" />
+          <option value="Twisted" />
+          <option value="typing-inspection" />
+          <option value="typing_extensions" />
+          <option value="urllib3" />
+          <option value="uvicorn" />
+          <option value="watchfiles" />
+          <option value="websockets" />
+          <option value="wrapt" />
+          <option value="zope.interface" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyStubPackagesAdvertiser" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="scipy" />
+          <option value="pandas" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="backend.src.users.crud.*" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

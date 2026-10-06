@@ -1,0 +1,20 @@
+# Секреты и локальное окружение
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Данные сервиса
+data/
+*.log

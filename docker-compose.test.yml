@@ -1,0 +1,60 @@
+# Линтеры и тесты backend на отдельной PostgreSQL:
+#   docker compose -f docker-compose.test.yml run --rm --build tests
+#   docker compose -f docker-compose.test.yml down -v
+name: arxiv-digest-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: arxiv_digest_test
+      POSTGRES_USER: arxiv_test
+      POSTGRES_PASSWORD: arxiv_test_password
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arxiv_test -d arxiv_digest_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  tests:
+    build:
+      context: ./backend
+      args:
+        INSTALL_DEV: "true"
+    image: arxiv-digest-backend:test
+    # значения ниже — тестовые, не секреты
+    environment:
+      APP_ENV: test
+      SERVICE_NAME: test
+      TZ: Europe/Moscow
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+      SECRET_KEY: test-secret-key-0123456789
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: test-admin-password
+      POSTGRES_HOST: postgres-test
+      POSTGRES_DB: arxiv_digest_test
+      POSTGRES_USER: arxiv_test
+      POSTGRES_PASSWORD: arxiv_test_password
+      RABBITMQ_HOST: rabbitmq-unavailable
+      RABBITMQ_PASSWORD: test-rabbit-password
+      LLM_BASE_URL: http://llm.invalid/v1
+      LLM_API_KEY: test-llm-api-key
+      LLM_MODEL: test-model
+      SMTP_PASSWORD: test-smtp-password
+      ARXIV_REQUEST_DELAY_SECONDS: "0"
+      DATA_DIR: /tmp/data
+      RUFF_CACHE_DIR: /tmp/ruff-cache
+      MYPY_CACHE_DIR: /tmp/mypy-cache
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command: >
+      sh -c "ruff check .
+      && ruff format --check .
+      && mypy app
+      && pytest"

@@ -1,0 +1,149 @@
+name: arxiv-digest
+
+x-backend: &backend
+  image: arxiv-digest-backend:latest
+  env_file: .env
+  volumes:
+    - data:/data
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
+x-worker-depends: &worker-depends
+  depends_on:
+    backend:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  backend:
+    <<: *backend
+    build:
+      context: ./backend
+    environment:
+      SERVICE_NAME: api
+    # миграции → создание админа → API
+    command: >
+      sh -c "alembic upgrade head
+      && python -m app.cli init
+      && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  worker:
+    <<: [*backend, *worker-depends]
+    environment:
+      SERVICE_NAME: worker
+    command: celery --quiet -A app.tasks.celery_app worker -Q default,mail -n default@%h --loglevel=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d default@$$HOSTNAME -t 10"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+
+  worker-llm:
+    <<: [*backend, *worker-depends]
+    environment:
+      SERVICE_NAME: worker-llm
+    command: celery --quiet -A app.tasks.celery_app worker -Q llm -c ${LLM_CONCURRENCY:-1} -n llm@%h --loglevel=INFO
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d llm@$$HOSTNAME -t 10"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+
+  # Beat должен работать в единственном экземпляре: не масштабировать
+  beat:
+    <<: [*backend, *worker-depends]
+    environment:
+      SERVICE_NAME: beat
+    command: celery --quiet -A app.tasks.celery_app beat -s /beat/celerybeat-schedule --pidfile= --loglevel=INFO
+    volumes:
+      - data:/data
+      - beat:/beat
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qa beat /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Отладка: docker compose --profile debug up -d ---
+  flower:
+    image: mher/flower:2.0
+    profiles: ["debug"]
+    command: celery --broker=amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672// flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # Локальный SMTP-сервер с веб-интерфейсом: http://localhost:8025, SMTP mailpit:1025
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["debug"]
+    ports:
+      - "8025:8025"
+
+volumes:
+  pgdata:
+  rabbitmq:
+  data:
+  beat:
