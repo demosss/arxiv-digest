@@ -50,3 +50,18 @@ async def test_unknown_route_uses_unified_error_format(client: AsyncClient) -> N
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Not Found", "code": "not_found"}
+
+
+async def test_public_settings(auth_client: AsyncClient, client: AsyncClient) -> None:
+    response = await auth_client.get("/api/settings")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["timezone"] == "Europe/Moscow"
+    assert body["llm_model"] == "test-model"
+    assert body["send_empty_digest"] is False
+    # секретов в ответе нет
+    assert not [key for key in body if "password" in key or "key" in key or "secret" in key]
+
+    del auth_client.headers["Authorization"]
+    assert (await client.get("/api/settings")).status_code == 401

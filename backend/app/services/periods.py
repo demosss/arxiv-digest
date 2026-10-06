@@ -3,6 +3,11 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.models.enums import TaskType
+
+# шаги, для которых имеет смысл период выборки
+PERIOD_TASKS = frozenset({TaskType.FULL_PIPELINE, TaskType.COLLECT, TaskType.BUILD_DIGEST})
+
 
 class InvalidPeriodError(ValueError):
     pass
@@ -40,3 +45,12 @@ def period_from_context(context: dict[str, Any]) -> tuple[datetime, datetime]:
         datetime.fromisoformat(start) if start else None,
         datetime.fromisoformat(end) if end else None,
     )
+
+
+def run_params(
+    task_type: TaskType, start: datetime | None = None, end: datetime | None = None
+) -> dict[str, Any]:
+    """Параметры запуска. Период фиксируется в момент запуска, а не выполнения."""
+    if task_type not in PERIOD_TASKS:
+        return {}
+    return dict(period_to_context(*resolve_period(start, end)))

@@ -5,10 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import RunStatus, RunTrigger, TaskType
 from app.schemas.common import Timestamps
-from app.services.periods import InvalidPeriodError, period_to_context, resolve_period
-
-# шаги, для которых имеет смысл период выборки
-_PERIOD_TASKS = frozenset({TaskType.FULL_PIPELINE, TaskType.COLLECT, TaskType.BUILD_DIGEST})
+from app.services.periods import InvalidPeriodError, resolve_period, run_params
 
 
 class RunCreate(BaseModel):
@@ -35,9 +32,7 @@ class RunCreate(BaseModel):
 
     def to_params(self) -> dict[str, Any]:
         """Параметры запуска. Период фиксируется в момент запуска, а не выполнения."""
-        params: dict[str, Any] = {}
-        if self.task_type in _PERIOD_TASKS:
-            params.update(period_to_context(*resolve_period(self.period_start, self.period_end)))
+        params = run_params(self.task_type, self.period_start, self.period_end)
         if self.digest_id is not None:
             params["digest_id"] = self.digest_id
         if self.paper_ids:

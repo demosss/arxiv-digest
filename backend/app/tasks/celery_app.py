@@ -14,6 +14,7 @@ from app.core.logging import configure_logging, get_logger
 QUEUE_DEFAULT = "default"
 QUEUE_LLM = "llm"
 QUEUE_MAIL = "mail"
+SCHEDULER_TICK_SECONDS = 60.0
 
 log = get_logger("app.celery")
 
@@ -34,7 +35,16 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     worker_hijack_root_logger=False,
     worker_redirect_stdouts=False,
-    imports=("app.tasks.pipeline",),
+    imports=("app.tasks.pipeline", "app.tasks.scheduler_tick"),
+    # единственная статическая периодическая задача; сами расписания хранятся в БД
+    beat_schedule={
+        "scheduler-tick": {
+            "task": "scheduler.tick",
+            "schedule": SCHEDULER_TICK_SECONDS,
+            # тик, пролежавший в очереди дольше интервала, уже не нужен
+            "options": {"expires": SCHEDULER_TICK_SECONDS - 5, "queue": QUEUE_DEFAULT},
+        }
+    },
 )
 
 

@@ -1,13 +1,14 @@
 """Жизненный цикл запусков (task_runs). Sync-сессия: вызывается из Celery и планировщика."""
 
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import utcnow
 from app.core.logging import get_logger
-from app.models import RunStatus, RunTrigger, TaskRun, TaskType
+from app.models import RunStatus, RunTrigger, TaskLog, TaskRun, TaskType
 
 log = get_logger(__name__)
 
@@ -133,3 +134,41 @@ def _sync_parent(session: Session, child: TaskRun) -> None:
         status=parent.status.value,
         steps={s.task_type.value: s.status.value for s in siblings},
     )
+
+
+def fail_stale_runs(session: Session, stale_hours: int) -> list[int]:
+    """Помечает failed запуски, у которых давно нет признаков жизни.
+
+    Признак жизни — изменение самого запуска, его шагов или новая запись в task_logs.
+    Так «убитый» воркер (OOM, kill -9) не блокирует следующие пайплайны навсегда.
+    """
+    now = utcnow()
+    threshold = now - timedelta(hours=stale_hours)
+    candidates = session.scalars(
+        select(TaskRun).where(
+            TaskRun.parent_run_id.is_(None),
+            TaskRun.status.in_(ACTIVE_STATUSES),
+            TaskRun.updated_at < threshold,
+        )
+    ).all()
+
+    failed: list[int] = []
+    for run in candidates:
+        family = [run, *run.children]
+        last_log = session.scalar(
+            select(func.max(TaskLog.ts)).where(TaskLog.run_id.in_([r.id for r in family]))
+        )
+        last_activity = max([r.updated_at for r in family] + ([last_log] if last_log else []))
+        if last_activity >= threshold:
+            continue
+        reason = f"Запуск завис: нет активности более {stale_hours} ч"
+        for member in reversed(family):
+            if member.status in ACTIVE_STATUSES:
+                member.status = RunStatus.FAILED
+                member.error = reason
+                _set_finished(member)
+        failed.append(run.id)
+        log.error("run_marked_stale", run_id=run.id, last_activity=last_activity.isoformat())
+    if failed:
+        session.flush()
+    return failed

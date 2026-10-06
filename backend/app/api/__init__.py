@@ -1,6 +1,19 @@
 from fastapi import APIRouter, Depends
 
-from app.api import auth, digests, health, logs, papers, recipients, runs, schedules, smtp, topics
+from app.api import (
+    auth,
+    dashboard,
+    digests,
+    health,
+    logs,
+    papers,
+    recipients,
+    runs,
+    schedules,
+    settings,
+    smtp,
+    topics,
+)
 from app.api.deps import get_current_user
 
 api_router = APIRouter(prefix="/api")
@@ -19,5 +32,7 @@ protected.include_router(runs.router)
 protected.include_router(logs.router)
 protected.include_router(papers.router)
 protected.include_router(digests.router)
+protected.include_router(dashboard.router)
+protected.include_router(settings.router)
 protected.include_router(health.llm_router)
 api_router.include_router(protected)
