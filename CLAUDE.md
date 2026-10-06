@@ -7,7 +7,7 @@
 - `backend/app/core` — конфиг (`pydantic-settings`), логирование (`structlog`), БД, безопасность, ошибки, middleware.
 - `backend/app/models` — модели SQLAlchemy 2.0, общие для API и Celery.
 - `backend/app/api` — тонкие роутеры FastAPI; `backend/app/services` — бизнес-логика; `backend/app/tasks` — тонкие Celery-задачи.
-- `frontend/` — админка (React + Vite + Mantine), nginx отдаёт статику и проксирует `/api` на backend.
+- `frontend/src` — админка (React + Vite + Mantine): `api/` (axios-клиент, типы, вызовы), `pages/`, `components/`, `lib/`; nginx отдаёт статику и проксирует `/api` на backend.
 - Compose: `postgres`, `rabbitmq`, `backend`, `worker` (очереди `default,mail`), `worker-llm` (очередь `llm`), `beat`, `frontend`; профиль `debug` — `flower`, `mailpit`.
 
 ## Команды
@@ -21,6 +21,10 @@ docker compose -f docker-compose.test.yml run --rm tests \
 ```
 
 Backend-тесты и линтеры запускаются только в контейнере: там Python 3.12, WeasyPrint и шрифты.
+
+```bash
+cd frontend && npm run lint && npm run format:check && npm run typecheck && npm run build
+```
 
 ## Соглашения
 
@@ -70,6 +74,11 @@ Backend-тесты и линтеры запускаются только в ко
 - **Зависшие запуски**: если у запуска и его шагов нет изменений и новых записей в `task_logs` дольше `PIPELINE_STALE_HOURS`, тик и запуск пайплайна помечают их `failed`. Иначе убитый воркер блокировал бы пайплайн навсегда.
 - **Период запуска по расписанию** фиксируется в момент срабатывания: предыдущие сутки UTC.
 - **Состояние LLM на дашборде кешируется на 30 секунд**; статус SMTP — проверка заполненности настроек, без подключения к серверу.
+- **`task_logs` сбрасываются в БД фоновым потоком раз в секунду** (и сразу при 20 записях в буфере), чтобы просмотр логов в UI не отставал, пока задача молчит в ожидании LLM.
+- **`GET /api/settings`** добавлен сверх ТЗ: несекретные параметры окружения для UI, в первую очередь таймзона отображения дат.
+- **Frontend**: типы API описаны вручную в `src/api/types.ts`; даты форматируются в таймзоне сервиса (`useFormat`); ошибки запросов и мутаций показываются уведомлениями централизованно в `src/lib/queryClient.ts`; опрос (`refetchInterval`) работает и в неактивной вкладке.
+- **Категории arXiv в форме темы** — `TagsInput` с подсказками популярных категорий и свободным вводом.
+- **Период ручного запуска** выбирается датами и трактуется как целые сутки UTC.
 - **Пароли — `bcrypt` напрямую** (без passlib), JWT — `PyJWT`, HS256, срок жизни 12 часов.
 - **Healthcheck beat** проверяет только, что процесс жив: у beat нет команды ping.
 - **Баннеры Celery отключены** (`celery --quiet`), чтобы в stdout шёл только JSON.
