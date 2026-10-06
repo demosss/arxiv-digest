@@ -24,7 +24,9 @@ class Topic(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True)
-    keywords: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}")
+    description: Mapped[str | None] = mapped_column(Text)
+    # поисковые выражения arXiv API; каждое выполняется отдельным запросом
+    queries: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}")
     arxiv_categories: Mapped[list[str]] = mapped_column(
         ARRAY(Text), default=list, server_default="{}"
     )

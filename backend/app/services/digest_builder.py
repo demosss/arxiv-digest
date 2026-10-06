@@ -57,7 +57,7 @@ class DigestSection:
     name: str
     anchor: str
     topic_id: int | None
-    keywords: list[str]
+    description: str | None
     items: list[DigestItem] = field(default_factory=list)
 
     @property
@@ -160,11 +160,16 @@ def build_sections(papers: list[Paper], tz: ZoneInfo) -> list[DigestSection]:
     ordered = sorted(topics.values(), key=lambda t: (t.name.lower(), t.id))
     sections = {
         topic.id: DigestSection(
-            name=topic.name, anchor=f"topic-{topic.id}", topic_id=topic.id, keywords=topic.keywords
+            name=topic.name,
+            anchor=f"topic-{topic.id}",
+            topic_id=topic.id,
+            description=topic.description,
         )
         for topic in ordered
     }
-    no_topic = DigestSection(name=NO_TOPIC_SECTION, anchor="topic-none", topic_id=None, keywords=[])
+    no_topic = DigestSection(
+        name=NO_TOPIC_SECTION, anchor="topic-none", topic_id=None, description=None
+    )
     order = {topic.id: index for index, topic in enumerate(ordered)}
 
     for paper in papers:

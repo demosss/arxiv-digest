@@ -46,7 +46,7 @@
 
   section.topic { break-before: page; }
   section.topic > h2 { font-size: 16pt; margin: 0 0 4pt; color: #1e3a8a; }
-  section.topic > .keywords { font: 9pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; margin: 0 0 12pt; }
+  section.topic > .description { font: 9pt "PT Sans", "DejaVu Sans", sans-serif; color: #6b7280; margin: 0 0 12pt; }
 
   article { margin: 0 0 16pt; padding-top: 8pt; border-top: 0.6pt solid #d1d5db; }
   article h3 { font-size: 12pt; line-height: 1.25; margin: 0 0 4pt; break-after: avoid; }
@@ -84,7 +84,7 @@
 {% for section in sections %}
 <section class="topic" id="{{ section.anchor }}">
   <h2>{{ section.name }}</h2>
-  {% if section.keywords %}<p class="keywords">Ключевые слова: {{ section.keywords | join(", ") }}</p>{% endif %}
+  {% if section.description %}<p class="description">{{ section.description }}</p>{% endif %}
 
   {% for item in section.items %}
   {% if item.is_reference %}

@@ -52,21 +52,16 @@ class ArxivEntry:
     abs_url: str
 
 
-def _keyword_term(keyword: str) -> str:
-    keyword = " ".join(keyword.replace('"', " ").split())
-    return f'all:"{keyword}"' if " " in keyword else f"all:{keyword}"
-
-
 def build_search_query(
-    keywords: list[str],
+    queries: list[str],
     categories: list[str],
     period_start: datetime,
     period_end: datetime,
 ) -> str:
-    """Запрос вида `(all:"a b" OR all:c) AND (cat:cs.CL OR cat:cs.AI) AND submittedDate:[..]`."""
-    terms = [_keyword_term(k) for k in keywords if k.strip()]
+    """Запрос вида `((q1) OR (q2)) AND (cat:cs.CL OR cat:cs.AI) AND submittedDate:[..]`."""
+    terms = [f"({q.strip()})" for q in queries if q.strip()]
     if not terms:
-        raise ArxivError("У темы нет ключевых слов")
+        raise ArxivError("У темы нет поисковых запросов")
     parts = [f"({' OR '.join(terms)})"]
     if categories:
         parts.append(f"({' OR '.join(f'cat:{c}' for c in categories)})")
@@ -74,12 +69,6 @@ def build_search_query(
     end = period_end.astimezone(UTC).strftime(_DATE_FORMAT)
     parts.append(f"submittedDate:[{start} TO {end}]")
     return " AND ".join(parts)
-
-
-def match_keywords(entry: ArxivEntry, keywords: list[str]) -> list[str]:
-    """Ключевые слова темы, которые встречаются в названии или аннотации статьи."""
-    haystack = f"{entry.title}\n{entry.abstract}".lower()
-    return [k for k in keywords if k.lower() in haystack]
 
 
 def _collapse(text: str) -> str:

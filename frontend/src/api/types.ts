@@ -44,7 +44,8 @@ export interface PublicSettings {
 export interface Topic {
   id: number;
   name: string;
-  keywords: string[];
+  description: string | null;
+  queries: string[];
   arxiv_categories: string[];
   is_active: boolean;
   created_at: string;
@@ -53,7 +54,7 @@ export interface Topic {
 
 export interface TopicInput {
   name: string;
-  keywords: string[];
+  queries: string[];
   arxiv_categories: string[];
   is_active: boolean;
 }
@@ -189,6 +190,7 @@ export interface PaperTopic {
   id: number;
   name: string;
   matched_keywords: string[];
+  matched_queries: string[];
 }
 
 export interface Paper {

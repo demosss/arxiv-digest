@@ -45,7 +45,7 @@ class Paper(TimestampMixin, Base):
 
 
 class PaperTopic(Base):
-    """Какая тема и какими ключевыми словами сматчила статью."""
+    """Какая тема и какими запросами нашла статью."""
 
     __tablename__ = "paper_topics"
 
@@ -55,7 +55,11 @@ class PaperTopic(Base):
     topic_id: Mapped[int] = mapped_column(
         ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True, index=True
     )
+    # устаревшее: заполнялось, пока темы задавались ключевыми словами
     matched_keywords: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), default=list, server_default="{}"
+    )
+    matched_queries: Mapped[list[str]] = mapped_column(
         ARRAY(Text), default=list, server_default="{}"
     )
 

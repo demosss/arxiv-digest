@@ -59,7 +59,11 @@ async def update_topic(
     topic_id: int, payload: TopicUpdate, session: SessionDep, user: CurrentUser
 ) -> Topic:
     topic = await get_or_404(session, Topic, topic_id)
-    changes = apply_changes(topic, payload.model_dump(exclude_unset=True, exclude_none=True))
+    data = payload.model_dump(exclude_unset=True)
+    # null допустим только для описания: так оно очищается
+    changes = apply_changes(
+        topic, {k: v for k, v in data.items() if v is not None or k == "description"}
+    )
     try:
         await session.commit()
     except IntegrityError as exc:

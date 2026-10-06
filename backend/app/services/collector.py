@@ -16,7 +16,6 @@ from app.services.arxiv_client import (
     ArxivEntry,
     ArxivError,
     build_search_query,
-    match_keywords,
     pdf_filename,
 )
 from app.services.pdf_text import ExtractedText, TextExtractionError, extract_text
@@ -137,7 +136,7 @@ class Collector:
     def _collect_topic(
         self, topic: Topic, period_start: datetime, period_end: datetime, stats: TopicStats
     ) -> list[int]:
-        query = build_search_query(topic.keywords, topic.arxiv_categories, period_start, period_end)
+        query = build_search_query(topic.queries, topic.arxiv_categories, period_start, period_end)
         log.info("collect_topic_started", topic=topic.name, topic_id=topic.id, query=query)
         entries = self._source.search(query, self._max_results)
         stats.found = len(entries)
@@ -166,14 +165,8 @@ class Collector:
                 # статья уже известна: по другой теме или из прошлого запуска
                 stats.duplicates += 1
 
-            link = self._session.get(PaperTopic, (paper.id, topic.id))
-            matched = match_keywords(entry, topic.keywords)
-            if link is None:
-                self._session.add(
-                    PaperTopic(paper_id=paper.id, topic_id=topic.id, matched_keywords=matched)
-                )
-            else:
-                link.matched_keywords = matched
+            if self._session.get(PaperTopic, (paper.id, topic.id)) is None:
+                self._session.add(PaperTopic(paper_id=paper.id, topic_id=topic.id))
             paper_ids.append(paper.id)
 
         self._session.commit()

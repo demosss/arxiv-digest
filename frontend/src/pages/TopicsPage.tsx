@@ -34,7 +34,7 @@ const CATEGORY_RE = /^[a-z][a-z-]*(\.[A-Za-z][A-Za-z-]*)?$/;
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Введите название').max(255),
-  keywords: z.array(z.string()).min(1, 'Добавьте хотя бы одно ключевое слово'),
+  queries: z.array(z.string()).min(1, 'Добавьте хотя бы один запрос'),
   arxiv_categories: z
     .array(z.string())
     .refine((items) => items.every((item) => CATEGORY_RE.test(item)), {
@@ -45,7 +45,7 @@ const schema = z.object({
 
 type TopicForm = z.infer<typeof schema>;
 
-const EMPTY: TopicForm = { name: '', keywords: [], arxiv_categories: [], is_active: true };
+const EMPTY: TopicForm = { name: '', queries: [], arxiv_categories: [], is_active: true };
 
 function TopicModal({
   topic,
@@ -66,7 +66,7 @@ function TopicModal({
         topic
           ? {
               name: topic.name,
-              keywords: topic.keywords,
+              queries: topic.queries,
               arxiv_categories: topic.arxiv_categories,
               is_active: topic.is_active,
             }
@@ -104,17 +104,16 @@ function TopicModal({
           />
           <Controller
             control={form.control}
-            name="keywords"
+            name="queries"
             render={({ field }) => (
               <TagsInput
-                label="Ключевые слова"
-                description="Слово или фраза; Enter — добавить. Статья подходит, если найдено любое из них"
+                label="Поисковые запросы"
+                description="Фраза или выражение arXiv API; Enter — добавить. Статья подходит под любой из запросов"
                 placeholder="large language model"
                 value={field.value}
                 onChange={field.onChange}
                 onBlur={field.onBlur}
-                error={errors.keywords?.message}
-                splitChars={[',', ';']}
+                error={errors.queries?.message}
                 clearable
               />
             )}
@@ -217,7 +216,7 @@ export function TopicsPage() {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Название</Table.Th>
-              <Table.Th>Ключевые слова</Table.Th>
+              <Table.Th>Запросы</Table.Th>
               <Table.Th>Категории arXiv</Table.Th>
               <Table.Th>Активна</Table.Th>
               <Table.Th w={90} />
@@ -229,7 +228,7 @@ export function TopicsPage() {
                 <Table.Td fw={500}>{topic.name}</Table.Td>
                 <Table.Td>
                   <Group gap={4}>
-                    {topic.keywords.map((keyword) => (
+                    {topic.queries.map((keyword) => (
                       <Badge key={keyword} variant="light" tt="none">
                         {keyword}
                       </Badge>

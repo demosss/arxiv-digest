@@ -56,7 +56,7 @@ def _run(db: Session, **kwargs: Any) -> TaskRun:
 
 
 def _topic(db: Session) -> None:
-    db.add(Topic(name="LLM", keywords=["large language model"], arxiv_categories=[]))
+    db.add(Topic(name="LLM", queries=['all:"large language model"'], arxiv_categories=[]))
     db.commit()
 
 

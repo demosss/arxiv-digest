@@ -10,6 +10,7 @@ class PaperTopicOut(BaseModel):
     id: int
     name: str
     matched_keywords: list[str]
+    matched_queries: list[str]
 
 
 class SummaryOut(Timestamps):

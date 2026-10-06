@@ -235,7 +235,7 @@ def test_summarize_task_success(db: Session, monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def test_papers_list_and_detail(auth_client: AsyncClient, db: Session) -> None:
-    topic = Topic(name="LLM", keywords=["large language model"])
+    topic = Topic(name="LLM", queries=['all:"large language model"'])
     db.add(topic)
     db.commit()
     summarized = make_paper(db, "2410.00001", PaperStatus.SUMMARIZED, title="Agents with tools")
@@ -255,7 +255,12 @@ async def test_papers_list_and_detail(auth_client: AsyncClient, db: Session) -> 
     by_id = {item["id"]: item for item in listing["items"]}
     assert by_id[summarized.id]["has_summary"] is True
     assert by_id[summarized.id]["topics"] == [
-        {"id": topic.id, "name": "LLM", "matched_keywords": ["large language model"]}
+        {
+            "id": topic.id,
+            "name": "LLM",
+            "matched_keywords": ["large language model"],
+            "matched_queries": [],
+        }
     ]
     assert by_id[extracted.id]["has_summary"] is False
     assert "full_text" not in by_id[extracted.id]

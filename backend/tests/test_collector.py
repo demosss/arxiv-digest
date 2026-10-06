@@ -9,7 +9,8 @@ from tests.factories import PERIOD_END, PERIOD_START, FakeSource, fake_extractor
 
 
 def _topic(db: Session, name: str, keywords: list[str], is_active: bool = True) -> Topic:
-    topic = Topic(name=name, keywords=keywords, arxiv_categories=["cs.CL"], is_active=is_active)
+    queries = [f'all:"{keyword}"' for keyword in keywords]
+    topic = Topic(name=name, queries=queries, arxiv_categories=["cs.CL"], is_active=is_active)
     db.add(topic)
     db.commit()
     return topic
@@ -72,8 +73,7 @@ def test_paper_matched_by_several_topics_is_stored_once(db: Session, tmp_path: P
     assert db.scalar(select(func.count()).select_from(Paper)) == 2
     paper = db.scalar(select(Paper).where(Paper.arxiv_id == "2410.00001"))
     assert paper is not None
-    links = {link.topic_id: link.matched_keywords for link in paper.topic_links}
-    assert links == {llm.id: ["large language model"], agents.id: ["agents", "tool use"]}
+    assert {link.topic_id for link in paper.topic_links} == {llm.id, agents.id}
     # PDF общей статьи скачан один раз
     assert source.downloads.count(shared.pdf_url) == 1
 

@@ -7,11 +7,9 @@ import pytest
 from app.services.arxiv_client import (
     MAX_ATTEMPTS,
     ArxivClient,
-    ArxivEntry,
     ArxivError,
     ArxivUnavailableError,
     build_search_query,
-    match_keywords,
     parse_feed,
     pdf_filename,
 )
@@ -57,25 +55,25 @@ def _client(handler: httpx.MockTransport, sleeps: list[float] | None = None) -> 
 # --- построение запроса ---
 
 
-def test_query_combines_keywords_categories_and_period() -> None:
+def test_query_combines_queries_categories_and_period() -> None:
     query = build_search_query(
-        ["large language model", "LLM", "retrieval-augmented generation"],
+        ['all:"large language model"', "ti:LLM AND abs:agents"],
         ["cs.CL", "cs.AI"],
         START,
         END,
     )
 
     assert query == (
-        '(all:"large language model" OR all:LLM OR all:"retrieval-augmented generation")'
+        '((all:"large language model") OR (ti:LLM AND abs:agents))'
         " AND (cat:cs.CL OR cat:cs.AI)"
         " AND submittedDate:[202410050000 TO 202410052359]"
     )
 
 
-def test_query_without_categories_and_with_quotes_in_keywords() -> None:
-    query = build_search_query(['"diffusion  model"'], [], START, END)
+def test_query_without_categories() -> None:
+    query = build_search_query(['all:"diffusion model"'], [], START, END)
 
-    assert query == '(all:"diffusion model") AND submittedDate:[202410050000 TO 202410052359]'
+    assert query == '((all:"diffusion model")) AND submittedDate:[202410050000 TO 202410052359]'
 
 
 def test_query_converts_period_to_utc() -> None:
@@ -83,7 +81,7 @@ def test_query_converts_period_to_utc() -> None:
 
     moscow = ZoneInfo("Europe/Moscow")
     query = build_search_query(
-        ["LLM"],
+        ["all:LLM"],
         [],
         datetime(2024, 10, 5, 3, 0, tzinfo=moscow),
         datetime(2024, 10, 6, 2, 59, tzinfo=moscow),
@@ -92,7 +90,7 @@ def test_query_converts_period_to_utc() -> None:
     assert "submittedDate:[202410050000 TO 202410052359]" in query
 
 
-def test_query_requires_keywords() -> None:
+def test_query_requires_queries() -> None:
     with pytest.raises(ArxivError):
         build_search_query(["  "], ["cs.CL"], START, END)
 
@@ -146,15 +144,6 @@ def test_parse_feed_raises_on_api_error_entry() -> None:
 def test_parse_feed_raises_on_garbage() -> None:
     with pytest.raises(ArxivError):
         parse_feed(b"<html><body>Rate exceeded.</body></html")
-
-
-def test_match_keywords_is_case_insensitive() -> None:
-    entry: ArxivEntry = parse_feed(FEED)[0][0]
-
-    assert match_keywords(entry, ["Large Language Model", "diffusion", "tool use"]) == [
-        "Large Language Model",
-        "tool use",
-    ]
 
 
 # --- HTTP: пагинация, ретраи, скачивание ---

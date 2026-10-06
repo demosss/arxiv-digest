@@ -49,8 +49,8 @@ def _summarized(db: Session, arxiv_id: str, title: str, topics: list[Topic]) -> 
 
 @pytest.fixture
 def topics(db: Session) -> tuple[Topic, Topic]:
-    agents = Topic(name="Агенты", keywords=["agents", "tool use"])
-    llm = Topic(name="Языковые модели", keywords=["large language model"])
+    agents = Topic(name="Агенты", queries=['all:"agents"'], description="Агенты и инструменты")
+    llm = Topic(name="Языковые модели", queries=['all:"large language model"'])
     db.add_all([agents, llm])
     db.commit()
     return agents, llm
@@ -126,7 +126,7 @@ def test_pdf_is_created_with_cyrillic_text(
     assert "05.10.2024 (UTC)" in text
     assert "Оглавление" in text
     assert "Агенты" in text and "Языковые модели" in text
-    assert "Ключевые слова: agents, tool use" in text
+    assert "Агенты и инструменты" in text
     assert "Agents That Plan" in text
     assert "Задача:" in text and "Значимость:" in text
     assert "многошаговыми" in text.replace("-\n", "").replace("\n", " ")

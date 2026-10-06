@@ -28,7 +28,10 @@ _LOAD_OPTIONS = (
 def _topics(paper: Paper) -> list[PaperTopicOut]:
     return [
         PaperTopicOut(
-            id=link.topic_id, name=link.topic.name, matched_keywords=link.matched_keywords
+            id=link.topic_id,
+            name=link.topic.name,
+            matched_keywords=link.matched_keywords,
+            matched_queries=link.matched_queries,
         )
         for link in sorted(paper.topic_links, key=lambda link: link.topic.name)
     ]
