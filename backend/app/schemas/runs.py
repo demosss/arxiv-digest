@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import DigestContent, RunStatus, RunTrigger, TaskType
+from app.models.enums import PAPER_TASKS, DigestContent, RunStatus, RunTrigger, TaskType
 from app.schemas.common import Timestamps
 from app.services.periods import InvalidPeriodError, resolve_period, run_params
 
@@ -34,8 +34,11 @@ class RunCreate(BaseModel):
 
     @model_validator(mode="after")
     def check_period(self) -> "RunCreate":
-        if self.task_type == TaskType.TRANSLATE:
-            raise ValueError("Перевод запускается из карточки статьи: POST /papers/{id}/translate")
+        if self.task_type in PAPER_TASKS:
+            raise ValueError(
+                "Задача запускается из карточки статьи: "
+                "POST /papers/{id}/translate или POST /papers/{id}/send"
+            )
         try:
             if self.period_start is not None or self.period_end is not None:
                 resolve_period(self.period_start, self.period_end)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import PaperStatus, Relevance
 from app.schemas.common import ORMModel, Timestamps
@@ -50,6 +50,26 @@ class PaperDetail(PaperOut):
     updated_at: datetime
     summary: SummaryOut | None
     translations: list[TranslationOut]
+    # сохранён ли PDF статьи: без него исходник нельзя отправить по почте
+    has_pdf: bool
+
+
+class PaperSendRequest(BaseModel):
+    """Какие документы статьи и кому отправить."""
+
+    recipient_ids: list[int] = Field(min_length=1, max_length=500)
+    include_pdf: bool = Field(default=False, description="Исходная статья в PDF")
+    translation_ids: list[int] = Field(
+        default_factory=list, max_length=50, description="Переводы статьи в docx"
+    )
+
+    @model_validator(mode="after")
+    def check_documents(self) -> "PaperSendRequest":
+        if not self.include_pdf and not self.translation_ids:
+            raise ValueError("Выберите хотя бы один документ для отправки")
+        self.recipient_ids = sorted(set(self.recipient_ids))
+        self.translation_ids = sorted(set(self.translation_ids))
+        return self
 
 
 class LLMHealthOut(BaseModel):

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<body style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;">
+    <tr>
+      <td style="padding:24px 28px 12px;border-bottom:3px solid #1d4ed8;">
+        <h1 style="margin:0 0 8px;font-size:20px;line-height:1.3;">{{ paper.title }}</h1>
+        {% if authors %}
+        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;">{{ authors }}</p>
+        {% endif %}
+        <p style="margin:0;font-size:14px;">
+          <a href="{{ paper.abs_url }}" style="color:#1d4ed8;text-decoration:none;">arXiv:{{ paper.arxiv_id }}</a>
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:16px 28px 8px;">
+        <p style="margin:0 0 6px;font-size:14px;">Во вложении:</p>
+        <ul style="margin:0;padding-left:22px;font-size:14px;line-height:1.5;">
+          {% for item in attachments %}
+          <li>{{ item.description }} — {{ item.filename }}</li>
+          {% endfor %}
+        </ul>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:12px 28px 24px;font-size:12px;color:#9ca3af;">
+        Письмо сформировано автоматически сервисом arXiv Digest.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

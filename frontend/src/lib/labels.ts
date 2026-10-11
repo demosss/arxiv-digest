@@ -24,6 +24,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   build_digest: 'Сборка дайджеста',
   send_digest: 'Рассылка',
   translate: 'Перевод статьи',
+  send_paper: 'Отправка статьи',
 };
 
 export const TASK_TYPE_OPTIONS = (Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((value) => ({
@@ -31,9 +32,9 @@ export const TASK_TYPE_OPTIONS = (Object.keys(TASK_TYPE_LABELS) as TaskType[]).m
   label: TASK_TYPE_LABELS[value],
 }));
 
-/** Задачи для ручного запуска и расписаний: перевод запускается только из карточки статьи. */
+/** Задачи для ручного запуска и расписаний: перевод и отправка статьи — только из её карточки. */
 export const LAUNCHABLE_TASK_TYPE_OPTIONS = TASK_TYPE_OPTIONS.filter(
-  (option) => option.value !== 'translate',
+  (option) => option.value !== 'translate' && option.value !== 'send_paper',
 );
 
 export const RUN_STATUS: Record<RunStatus, StatusView> = {
@@ -200,6 +201,12 @@ const STAT_LABELS: Record<string, string> = {
   tables: 'Таблиц',
   references: 'Записей литературы',
   docx_size_bytes: 'Размер docx, байт',
+  attachments: 'Вложения',
+  attachments_size_bytes: 'Размер вложений, байт',
+  include_pdf: 'Исходная статья (PDF)',
+  recipient_ids: 'Получатели №',
+  translation_ids: 'Переводы №',
+  errors: 'Не доставлено',
 };
 
 export function statLabel(key: string): string {

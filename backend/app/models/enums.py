@@ -13,6 +13,12 @@ class TaskType(StrEnum):
     SEND_DIGEST = "send_digest"
     # перевод одной статьи в docx; запускается из карточки статьи, в расписаниях не используется
     TRANSLATE = "translate"
+    # отправка документов статьи (PDF, переводы) выбранным получателям; тоже из карточки
+    SEND_PAPER = "send_paper"
+
+
+# задачи одной статьи: запускаются из её карточки, в расписаниях и ручном запуске их нет
+PAPER_TASKS = frozenset({TaskType.TRANSLATE, TaskType.SEND_PAPER})
 
 
 class SmtpSecurity(StrEnum):

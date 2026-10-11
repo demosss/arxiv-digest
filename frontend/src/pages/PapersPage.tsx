@@ -27,6 +27,7 @@ import {
   IconLanguage,
   IconRefresh,
   IconSearch,
+  IconSend,
   IconTrash,
 } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -53,6 +54,7 @@ import {
   confirmDelete,
   usePagination,
 } from '../components/common';
+import { SendPaperModal } from '../components/SendPaperModal';
 import { TranslateModal } from '../components/TranslateModal';
 import { formatDuration } from '../lib/dates';
 import { useFormat } from '../lib/format';
@@ -180,6 +182,7 @@ function TranslationStates({ translations }: { translations: Translation[] }) {
 
 function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: () => void }) {
   const [translateOpened, setTranslateOpened] = useState(false);
+  const [sendOpened, setSendOpened] = useState(false);
   const fmt = useFormat();
   const queryClient = useQueryClient();
   const { data: paper, isLoading } = useQuery({
@@ -261,6 +264,13 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
               Перевести
             </Button>
             <TranslationDownload translations={paper.translations} />
+            <Button
+              variant="default"
+              leftSection={<IconSend size={16} />}
+              onClick={() => setSendOpened(true)}
+            >
+              Отправить
+            </Button>
           </Group>
           <TranslationStates translations={paper.translations} />
 
@@ -370,6 +380,13 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
           paperId={paper.id}
           opened={translateOpened}
           onClose={() => setTranslateOpened(false)}
+        />
+      ) : null}
+      {paper ? (
+        <SendPaperModal
+          paperId={paper.id}
+          opened={sendOpened}
+          onClose={() => setSendOpened(false)}
         />
       ) : null}
     </Drawer>

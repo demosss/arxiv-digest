@@ -10,7 +10,13 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { IconDownload, IconListDetails, IconSearch, IconTrash } from '@tabler/icons-react';
+import {
+  IconDownload,
+  IconListDetails,
+  IconSearch,
+  IconSend,
+  IconTrash,
+} from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -31,6 +37,7 @@ import {
   confirmDelete,
   usePagination,
 } from '../components/common';
+import { SendPaperModal } from '../components/SendPaperModal';
 import { formatDuration } from '../lib/dates';
 import { useFormat } from '../lib/format';
 import { TRANSLATION_SOURCE_LABELS, TRANSLATION_STATUS } from '../lib/labels';
@@ -52,6 +59,8 @@ export function TranslationsPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch] = useDebouncedValue(search, 300);
   const [status, setStatus] = useState<TranslationStatus | null>(null);
+  // перевод, который отправляют по почте: в окне отмечен только он
+  const [sending, setSending] = useState<TranslationListItem | null>(null);
 
   const filters: TranslationFilters = {
     status: status ?? undefined,
@@ -148,7 +157,7 @@ export function TranslationsPage() {
               <Table.Th>Источник</Table.Th>
               <Table.Th>Статус</Table.Th>
               <Table.Th>Обновлён</Table.Th>
-              <Table.Th w={130} />
+              <Table.Th w={160} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -194,6 +203,20 @@ export function TranslationsPage() {
                         onClick={() => download.mutate(translation)}
                       >
                         <IconDownload size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                    <Tooltip
+                      label={
+                        translation.has_file ? 'Отправить по почте' : 'Файл перевода ещё не готов'
+                      }
+                    >
+                      <ActionIcon
+                        variant="subtle"
+                        aria-label="Отправить по почте"
+                        disabled={!translation.has_file}
+                        onClick={() => setSending(translation)}
+                      >
+                        <IconSend size={16} />
                       </ActionIcon>
                     </Tooltip>
                     {translation.run_id !== null ? (
@@ -243,6 +266,15 @@ export function TranslationsPage() {
           .
         </Text>
       </QueryState>
+
+      {sending ? (
+        <SendPaperModal
+          paperId={sending.paper_id}
+          opened
+          onClose={() => setSending(null)}
+          preset={{ pdf: false, translationIds: [sending.id] }}
+        />
+      ) : null}
     </>
   );
 }
