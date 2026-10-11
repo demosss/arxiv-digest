@@ -96,8 +96,14 @@ class LLMClient:
             extra_body=settings.llm_extra_body,
         )
 
-    def complete(self, system: str, user: str, *, purpose: str) -> LLMResponse:
-        """Один запрос к модели с ретраями на сетевых ошибках, таймаутах, 429 и 5xx."""
+    def complete(
+        self, system: str, user: str, *, purpose: str, max_tokens: int | None = None
+    ) -> LLMResponse:
+        """Один запрос к модели с ретраями на сетевых ошибках, таймаутах, 429 и 5xx.
+
+        `max_tokens` переопределяет лимит ответа из настроек (переводу нужен больший).
+        """
+        max_tokens = max_tokens or self._max_tokens
         log.debug("llm_request", purpose=purpose, system_prompt=system, user_prompt=user)
         last_error: Exception | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -110,7 +116,7 @@ class LLMClient:
                         {"role": "user", "content": user},
                     ],
                     temperature=self._temperature,
-                    max_tokens=self._max_tokens,
+                    max_tokens=max_tokens,
                     extra_body=self._extra_body,
                 )
             except (
@@ -161,7 +167,7 @@ class LLMClient:
                 duration_ms=duration_ms,
             )
             if response.finish_reason == "length":
-                log.warning("llm_response_truncated", purpose=purpose, max_tokens=self._max_tokens)
+                log.warning("llm_response_truncated", purpose=purpose, max_tokens=max_tokens)
             log.debug("llm_response", purpose=purpose, response=text)
             return response
 

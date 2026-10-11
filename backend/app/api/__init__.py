@@ -13,6 +13,7 @@ from app.api import (
     settings,
     smtp,
     topics,
+    translations,
 )
 from app.api.deps import get_current_user
 
@@ -32,6 +33,7 @@ protected.include_router(runs.router)
 protected.include_router(logs.router)
 protected.include_router(papers.router)
 protected.include_router(digests.router)
+protected.include_router(translations.router)
 protected.include_router(dashboard.router)
 protected.include_router(settings.router)
 protected.include_router(health.llm_router)

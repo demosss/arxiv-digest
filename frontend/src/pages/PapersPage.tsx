@@ -9,6 +9,7 @@ import {
   Drawer,
   Group,
   Loader,
+  Menu,
   Select,
   SimpleGrid,
   Stack,
@@ -19,7 +20,15 @@ import {
 } from '@mantine/core';
 import { DatePickerInput, type DatesRangeValue } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
-import { IconExternalLink, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-react';
+import {
+  IconChevronDown,
+  IconExternalLink,
+  IconFileTypeDocx,
+  IconLanguage,
+  IconRefresh,
+  IconSearch,
+  IconTrash,
+} from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -27,14 +36,15 @@ import { Link } from 'react-router-dom';
 import {
   clearPapers,
   deletePaper,
+  downloadTranslation,
   getPaper,
   listPapers,
   listTopics,
   resummarizePaper,
   type PaperFilters,
 } from '../api/endpoints';
-import type { Paper, PaperStatus } from '../api/types';
-import { PaperStatusBadge, RelevanceBadge } from '../components/Badges';
+import type { Paper, PaperStatus, Translation } from '../api/types';
+import { PaperStatusBadge, RelevanceBadge, TranslationStatusBadge } from '../components/Badges';
 import {
   Field,
   PageHeader,
@@ -43,6 +53,7 @@ import {
   confirmDelete,
   usePagination,
 } from '../components/common';
+import { TranslateModal } from '../components/TranslateModal';
 import { formatDuration } from '../lib/dates';
 import { useFormat } from '../lib/format';
 import { PAPER_STATUS } from '../lib/labels';
@@ -86,13 +97,98 @@ function SummaryText({ text }: { text: string }) {
   );
 }
 
+function isActiveTranslation(translation: Translation): boolean {
+  return translation.status === 'queued' || translation.status === 'running';
+}
+
+/** Кнопка «Перевод docx»: один готовый файл скачивается сразу, несколько — выбором языка. */
+function TranslationDownload({ translations }: { translations: Translation[] }) {
+  const download = useMutation({ mutationFn: downloadTranslation });
+  const ready = translations.filter((translation) => translation.has_file);
+  const [single] = ready;
+  if (!single) {
+    return null;
+  }
+  if (ready.length === 1) {
+    return (
+      <Button
+        variant="light"
+        color="teal"
+        leftSection={<IconFileTypeDocx size={16} />}
+        loading={download.isPending}
+        onClick={() => download.mutate(single)}
+      >
+        Перевод docx
+      </Button>
+    );
+  }
+  return (
+    <Menu position="bottom-end" withinPortal>
+      <Menu.Target>
+        <Button
+          variant="light"
+          color="teal"
+          leftSection={<IconFileTypeDocx size={16} />}
+          rightSection={<IconChevronDown size={14} />}
+          loading={download.isPending}
+        >
+          Перевод docx
+        </Button>
+      </Menu.Target>
+      <Menu.Dropdown>
+        {ready.map((translation) => (
+          <Menu.Item key={translation.id} onClick={() => download.mutate(translation)}>
+            {translation.language_label}
+          </Menu.Item>
+        ))}
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
+/** Переводы, которые выполняются или завершились ошибкой: готовые видны по кнопке скачивания. */
+function TranslationStates({ translations }: { translations: Translation[] }) {
+  const shown = translations.filter(
+    (translation) => isActiveTranslation(translation) || translation.status === 'failed',
+  );
+  if (shown.length === 0) {
+    return null;
+  }
+  return (
+    <Stack gap={6}>
+      {shown.map((translation) => (
+        <div key={translation.id}>
+          <Group gap="xs">
+            <Text size="sm">Перевод ({translation.language_label}):</Text>
+            <TranslationStatusBadge status={translation.status} size="sm" />
+            {translation.run_id !== null ? (
+              <Anchor component={Link} to={`/runs/${translation.run_id}`} size="sm">
+                запуск №{translation.run_id}
+              </Anchor>
+            ) : null}
+          </Group>
+          {translation.status === 'failed' && translation.error ? (
+            <Text size="xs" c="red" mt={2}>
+              {translation.error}
+            </Text>
+          ) : null}
+        </div>
+      ))}
+    </Stack>
+  );
+}
+
 function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: () => void }) {
+  const [translateOpened, setTranslateOpened] = useState(false);
   const fmt = useFormat();
   const queryClient = useQueryClient();
   const { data: paper, isLoading } = useQuery({
     queryKey: ['paper', paperId],
     queryFn: () => getPaper(paperId as number),
     enabled: paperId !== null,
+    // пока идёт перевод, карточка обновляется сама: кнопка скачивания появится без перезагрузки
+    refetchInterval: (query) =>
+      query.state.data?.translations.some(isActiveTranslation) ? 4000 : false,
   });
 
   const resummarize = useMutation({
@@ -157,7 +253,16 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
             >
               Пересуммаризировать
             </Button>
+            <Button
+              variant="default"
+              leftSection={<IconLanguage size={16} />}
+              onClick={() => setTranslateOpened(true)}
+            >
+              Перевести
+            </Button>
+            <TranslationDownload translations={paper.translations} />
           </Group>
+          <TranslationStates translations={paper.translations} />
 
           {paper.error ? (
             <Alert color="red" title="Ошибка обработки">
@@ -260,6 +365,13 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
           </Text>
         </Stack>
       ) : null}
+      {paper ? (
+        <TranslateModal
+          paperId={paper.id}
+          opened={translateOpened}
+          onClose={() => setTranslateOpened(false)}
+        />
+      ) : null}
     </Drawer>
   );
 }
@@ -300,6 +412,7 @@ export function PapersPage() {
     void queryClient.invalidateQueries({ queryKey: ['papers'] });
     void queryClient.invalidateQueries({ queryKey: ['digests'] });
     void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    void queryClient.invalidateQueries({ queryKey: ['translations'] });
   };
   const remove = useMutation({
     mutationFn: (paper: Paper) => deletePaper(paper.id),
@@ -331,7 +444,7 @@ export function PapersPage() {
           disabled={!data?.total}
           onClick={() =>
             confirmDelete(
-              `${hasFilters ? 'статьи под текущими фильтрами' : 'все статьи'} (${data?.total ?? 0}) вместе с резюме и PDF-файлами`,
+              `${hasFilters ? 'статьи под текущими фильтрами' : 'все статьи'} (${data?.total ?? 0}) вместе с резюме, переводами и файлами`,
               () => clear.mutate(),
             )
           }

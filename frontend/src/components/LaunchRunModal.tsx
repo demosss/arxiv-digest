@@ -18,7 +18,11 @@ import { createRun } from '../api/endpoints';
 import type { DigestContent, RunCreate, TaskType } from '../api/types';
 import { utcDayBounds } from '../lib/dates';
 import { useFormat } from '../lib/format';
-import { DIGEST_CONTENT_LABELS, DIGEST_CONTENT_OPTIONS, TASK_TYPE_OPTIONS } from '../lib/labels';
+import {
+  DIGEST_CONTENT_LABELS,
+  DIGEST_CONTENT_OPTIONS,
+  LAUNCHABLE_TASK_TYPE_OPTIONS,
+} from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
 const PERIOD_TASKS: TaskType[] = ['full_pipeline', 'collect', 'build_digest'];
@@ -30,6 +34,7 @@ const DESCRIPTIONS: Record<TaskType, string> = {
   summarize: 'Аннотация и резюме для всех статей с извлечённым текстом.',
   build_digest: 'PDF-дайджест из статей периода, у которых уже есть резюме.',
   send_digest: 'Рассылка дайджеста активным получателям.',
+  translate: 'Перевод статьи в docx: запускается из карточки статьи.',
 };
 
 interface Props {
@@ -111,7 +116,7 @@ function LaunchRunForm({ onClose, initialType }: { onClose: () => void; initialT
     <Stack>
       <Select
         label="Задача"
-        data={TASK_TYPE_OPTIONS}
+        data={LAUNCHABLE_TASK_TYPE_OPTIONS}
         value={taskType}
         onChange={(value) => value && setTaskType(value as TaskType)}
         allowDeselect={false}

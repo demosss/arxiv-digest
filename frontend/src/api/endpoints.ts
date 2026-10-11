@@ -34,6 +34,10 @@ import type {
   TopicInput,
   TopicPreview,
   TopicPreviewInput,
+  Translation,
+  TranslationLanguage,
+  TranslationListItem,
+  TranslationStatus,
   User,
 } from './types';
 
@@ -210,6 +214,39 @@ export const deletePaper = (id: number) => api.delete<void>(`/papers/${id}`).the
 
 export const clearPapers = (filters: PaperFilters) =>
   api.delete<DeletedCount>('/papers', { params: clean(filters) }).then((r) => r.data);
+
+export const translatePaper = (id: number, language: string) =>
+  api.post<Translation>(`/papers/${id}/translate`, { language }).then((r) => r.data);
+
+// --- Переводы ---
+
+export interface TranslationFilters {
+  status?: TranslationStatus;
+  q?: string;
+}
+
+export const listTranslations = (params: PageParams & TranslationFilters) =>
+  api
+    .get<Page<TranslationListItem>>('/translations', { params: clean(params) })
+    .then((r) => r.data);
+
+export const listTranslationLanguages = () =>
+  api.get<TranslationLanguage[]>('/translations/languages').then((r) => r.data);
+
+export const deleteTranslation = (id: number) =>
+  api.delete<void>(`/translations/${id}`).then(() => undefined);
+
+/** Удаляет переводы под фильтрами; выполняющиеся остаются. */
+export const clearTranslations = (filters: TranslationFilters) =>
+  api.delete<DeletedCount>('/translations', { params: clean(filters) }).then((r) => r.data);
+
+/** Файл скачивается через axios (нужен заголовок Authorization) и отдаётся браузеру. */
+export async function downloadTranslation(translation: Translation): Promise<void> {
+  const response = await api.get<Blob>(`/translations/${translation.id}/docx`, {
+    responseType: 'blob',
+  });
+  saveBlob(response.data, translation.filename ?? `translation_${translation.id}.docx`);
+}
 
 // --- Дайджесты ---
 

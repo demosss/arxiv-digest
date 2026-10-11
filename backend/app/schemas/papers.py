@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.models.enums import PaperStatus, Relevance
 from app.schemas.common import ORMModel, Timestamps
+from app.schemas.translations import TranslationOut
 
 
 class PaperTopicOut(BaseModel):
@@ -48,6 +49,7 @@ class PaperDetail(PaperOut):
     updated_at_arxiv: datetime | None
     updated_at: datetime
     summary: SummaryOut | None
+    translations: list[TranslationOut]
 
 
 class LLMHealthOut(BaseModel):

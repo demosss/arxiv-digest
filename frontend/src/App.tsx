@@ -24,6 +24,7 @@ import { RunsPage } from './pages/RunsPage';
 import { SchedulesPage } from './pages/SchedulesPage';
 import { SmtpPage } from './pages/SmtpPage';
 import { TopicsPage } from './pages/TopicsPage';
+import { TranslationsPage } from './pages/TranslationsPage';
 
 const theme = createTheme({ primaryColor: 'blue', defaultRadius: 'md' });
 
@@ -63,6 +64,7 @@ export function App() {
                       <Route path="runs/:runId" element={<RunDetailPage />} />
                       <Route path="papers" element={<PapersPage />} />
                       <Route path="digests" element={<DigestsPage />} />
+                      <Route path="translations" element={<TranslationsPage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>
                   </Route>

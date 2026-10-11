@@ -1,5 +1,6 @@
 """Вспомогательные объекты для тестов: статьи arXiv, поддельный источник, PDF с текстом."""
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -127,6 +128,56 @@ class FakeLLM:
             duration_ms=250,
             finish_reason="stop",
         )
+
+    def health(self) -> LLMHealth:
+        return LLMHealth(ok=True, base_url="http://llm.test/v1", model=self.model, latency_ms=5)
+
+
+ENGLISH_PARAGRAPH = (
+    "Small vehicles are inherently susceptible to wave-induced perturbations, which often "
+    "trigger high-amplitude roll motions and compromise the stability of onboard systems."
+)
+RUSSIAN_PARAGRAPH = (
+    "Малые суда по своей природе подвержены возмущениям от волн, которые часто вызывают "
+    "бортовую качку большой амплитуды и нарушают устойчивость бортовых систем."
+)
+
+
+class FakeTranslationLLM:
+    """Отвечает заранее заданными репликами; без них «переводит» по простому правилу."""
+
+    model = "fake-model"
+
+    def __init__(self, replies: list[str | Exception] | None = None) -> None:
+        self.replies = list(replies or [])
+        self.calls: list[dict[str, object]] = []
+        self.finish_reason = "stop"
+
+    def complete(
+        self, system: str, user: str, *, purpose: str, max_tokens: int | None = None
+    ) -> LLMResponse:
+        self.calls.append({"user": user, "purpose": purpose, "max_tokens": max_tokens})
+        reply = self.replies.pop(0) if self.replies else self._auto(user, purpose)
+        if isinstance(reply, Exception):
+            raise reply
+        return LLMResponse(
+            text=reply,
+            prompt_tokens=10,
+            completion_tokens=5,
+            duration_ms=7,
+            finish_reason=self.finish_reason,
+        )
+
+    @staticmethod
+    def _auto(user: str, purpose: str) -> str:
+        if purpose == "translate batch":
+            lines = re.findall(r"^(\d+)\. (.+)$", user, flags=re.MULTILINE)
+            return "\n".join(f"{number}. {text} (рус.)" for number, text in lines)
+        if purpose == "formula":
+            return "\\frac{a}{b}"
+        source = user.split("<<<\n", 1)[1].rsplit("\n>>>", 1)[0]
+        tokens = "".join(re.findall(r"<f\d+/>", source))
+        return f"{RUSSIAN_PARAGRAPH} {tokens}".strip()
 
     def health(self) -> LLMHealth:
         return LLMHealth(ok=True, base_url="http://llm.test/v1", model=self.model, latency_ms=5)

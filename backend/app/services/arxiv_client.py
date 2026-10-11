@@ -230,6 +230,18 @@ class ArxivClient:
             log.warning("arxiv_search_truncated", results=len(results), max_results=max_results)
         return results[:max_results]
 
+    def fetch(self, url: str, what: str = "Загрузка страницы") -> tuple[bytes, str]:
+        """Содержимое страницы или файла с arXiv и конечный адрес после редиректов."""
+
+        def action() -> tuple[bytes, str]:
+            response = self._http.get(
+                url, headers=self._headers, timeout=HTTP_TIMEOUT, follow_redirects=True
+            )
+            response.raise_for_status()
+            return response.content, str(response.url)
+
+        return self._with_retries(what, url, action)
+
     def download_pdf(self, url: str, destination: Path) -> int:
         """Скачивает PDF через временный файл. Возвращает размер в байтах."""
         destination.parent.mkdir(parents=True, exist_ok=True)

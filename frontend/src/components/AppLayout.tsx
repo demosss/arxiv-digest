@@ -16,6 +16,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   IconClock,
   IconFileText,
+  IconLanguage,
   IconLayoutDashboard,
   IconLogout,
   IconMail,
@@ -45,6 +46,7 @@ const NAV_ITEMS = [
   { to: '/runs', label: 'Запуски', icon: IconPlayerPlay },
   { to: '/papers', label: 'Статьи', icon: IconFileText },
   { to: '/digests', label: 'Дайджесты', icon: IconNews },
+  { to: '/translations', label: 'Переводы', icon: IconLanguage },
 ];
 
 const passwordSchema = z
