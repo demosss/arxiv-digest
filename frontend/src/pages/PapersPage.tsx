@@ -67,6 +67,19 @@ const STATUS_OPTIONS = (Object.keys(PAPER_STATUS) as PaperStatus[]).map((value) 
 }));
 const SUMMARY_LABEL_RE = /^(Задача|Метод|Результаты|Значимость):\s*/;
 
+/**
+ * Начинает текст с заглавной буквы — как дайджест (capitalize_first в digest_builder.py).
+ * Обозначение с заглавной буквой или цифрой внутри («mAP», «x86») не меняется.
+ */
+function capitalizeFirst(text: string): string {
+  const first = text.charAt(0);
+  const word = text.split(/\s/, 1)[0] ?? '';
+  if (first === first.toUpperCase() || /[\p{Lu}\d]/u.test(word)) {
+    return text;
+  }
+  return first.toUpperCase() + text.slice(1);
+}
+
 function endOfDay(date: Date): Date {
   const end = new Date(date);
   end.setHours(23, 59, 59, 999);
@@ -87,10 +100,10 @@ function SummaryText({ text }: { text: string }) {
                 <Text span fw={700} inherit>
                   {match[1]}:
                 </Text>{' '}
-                {paragraph.slice(match[0].length)}
+                {capitalizeFirst(paragraph.slice(match[0].length))}
               </>
             ) : (
-              paragraph
+              capitalizeFirst(paragraph.trim())
             )}
           </Text>
         );
@@ -348,7 +361,7 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
                   <Text span fw={700} inherit>
                     Аннотация:
                   </Text>{' '}
-                  {paper.summary.abstract_ru}
+                  {capitalizeFirst(paper.summary.abstract_ru)}
                 </Text>
               ) : null}
               <SummaryText text={paper.summary.text_ru} />
