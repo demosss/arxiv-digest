@@ -2,8 +2,10 @@ from app.models.admin import SMTP_SETTINGS_ID, AdminUser, Recipient, Schedule, S
 from app.models.digest import Digest, DigestDelivery, DigestPaper
 from app.models.enums import (
     DeliveryStatus,
+    DigestContent,
     DigestStatus,
     PaperStatus,
+    Relevance,
     RunStatus,
     RunTrigger,
     SmtpSecurity,
@@ -17,6 +19,7 @@ __all__ = [
     "AdminUser",
     "DeliveryStatus",
     "Digest",
+    "DigestContent",
     "DigestDelivery",
     "DigestPaper",
     "DigestStatus",
@@ -24,6 +27,7 @@ __all__ = [
     "PaperStatus",
     "PaperTopic",
     "Recipient",
+    "Relevance",
     "RunStatus",
     "RunTrigger",
     "Schedule",

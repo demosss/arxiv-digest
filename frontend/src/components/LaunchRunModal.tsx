@@ -15,17 +15,19 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { createRun } from '../api/endpoints';
-import type { RunCreate, TaskType } from '../api/types';
+import type { DigestContent, RunCreate, TaskType } from '../api/types';
 import { utcDayBounds } from '../lib/dates';
-import { TASK_TYPE_OPTIONS } from '../lib/labels';
+import { useFormat } from '../lib/format';
+import { DIGEST_CONTENT_LABELS, DIGEST_CONTENT_OPTIONS, TASK_TYPE_OPTIONS } from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
 const PERIOD_TASKS: TaskType[] = ['full_pipeline', 'collect', 'build_digest'];
+const DIGEST_TASKS: TaskType[] = ['full_pipeline', 'build_digest'];
 
 const DESCRIPTIONS: Record<TaskType, string> = {
   full_pipeline: 'Сбор → суммаризация → сборка дайджеста → рассылка, одной цепочкой.',
   collect: 'Поиск препринтов по активным темам, скачивание PDF и извлечение текста.',
-  summarize: 'Резюме для всех статей с извлечённым текстом.',
+  summarize: 'Аннотация и резюме для всех статей с извлечённым текстом.',
   build_digest: 'PDF-дайджест из статей периода, у которых уже есть резюме.',
   send_digest: 'Рассылка дайджеста активным получателям.',
 };
@@ -54,6 +56,10 @@ function LaunchRunForm({ onClose, initialType }: { onClose: () => void; initialT
   const [digestId, setDigestId] = useState<number | string>('');
   const [force, setForce] = useState(false);
   const [retryFailed, setRetryFailed] = useState(false);
+  const [fillAbstracts, setFillAbstracts] = useState(false);
+  // null — состав по умолчанию из DIGEST_CONTENT
+  const [digestContent, setDigestContent] = useState<DigestContent | null>(null);
+  const defaultContent = useFormat().settings?.digest_content;
 
   const mutation = useMutation({
     mutationFn: createRun,
@@ -89,7 +95,14 @@ function LaunchRunForm({ onClose, initialType }: { onClose: () => void; initialT
       payload.force = force;
     }
     if (taskType === 'summarize') {
-      payload.retry_failed = retryFailed;
+      if (fillAbstracts) {
+        payload.fill_abstracts = true;
+      } else {
+        payload.retry_failed = retryFailed;
+      }
+    }
+    if (DIGEST_TASKS.includes(taskType) && digestContent) {
+      payload.digest_content = digestContent;
     }
     mutation.mutate(payload);
   };
@@ -122,12 +135,37 @@ function LaunchRunForm({ onClose, initialType }: { onClose: () => void; initialT
         />
       ) : null}
 
-      {taskType === 'summarize' ? (
-        <Checkbox
-          label="Повторить и для статей, у которых суммаризация раньше не удалась"
-          checked={retryFailed}
-          onChange={(event) => setRetryFailed(event.currentTarget.checked)}
+      {DIGEST_TASKS.includes(taskType) ? (
+        <Select
+          label="Состав карточки статьи в дайджесте"
+          description="Только аннотация — короткий дайджест: один абзац на статью"
+          placeholder={
+            defaultContent
+              ? `По умолчанию: ${DIGEST_CONTENT_LABELS[defaultContent].toLowerCase()}`
+              : 'По умолчанию'
+          }
+          data={DIGEST_CONTENT_OPTIONS}
+          value={digestContent}
+          onChange={(value) => setDigestContent(value as DigestContent | null)}
+          clearable
         />
+      ) : null}
+
+      {taskType === 'summarize' ? (
+        <>
+          <Checkbox
+            label="Повторить и для статей, у которых суммаризация раньше не удалась"
+            checked={retryFailed && !fillAbstracts}
+            disabled={fillAbstracts}
+            onChange={(event) => setRetryFailed(event.currentTarget.checked)}
+          />
+          <Checkbox
+            label="Только дописать аннотации статьям, у которых резюме уже есть"
+            description="Новые статьи в таком запуске не суммаризируются"
+            checked={fillAbstracts}
+            onChange={(event) => setFillAbstracts(event.currentTarget.checked)}
+          />
+        </>
       ) : null}
 
       {taskType === 'send_digest' ? (

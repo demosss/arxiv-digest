@@ -430,7 +430,7 @@ def test_scheduled_full_pipeline_end_to_end(
 
     db.add_all(
         [
-            Topic(name="LLM", keywords=["large language model"]),
+            Topic(name="LLM", queries=['all:"large language model"']),
             Recipient(email="reader@example.com"),
             SmtpSettings(
                 id=SMTP_SETTINGS_ID,
@@ -491,7 +491,7 @@ def test_failed_step_stops_the_chain(
             raise ValueError("arXiv вернул неожиданный ответ")
 
     monkeypatch.setattr(pipeline, "ArxivClient", lambda *args, **kwargs: BrokenSource())
-    db.add(Topic(name="LLM", keywords=["large language model"]))
+    db.add(Topic(name="LLM", queries=['all:"large language model"']))
     db.commit()
 
     parent = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL)

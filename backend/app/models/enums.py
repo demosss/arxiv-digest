@@ -25,6 +25,16 @@ class PaperStatus(StrEnum):
     TEXT_EXTRACTED = "text_extracted"
     SUMMARIZED = "summarized"
     FAILED = "failed"
+    # LLM не подтвердила, что статья относится хотя бы к одной из нашедших её тем
+    IRRELEVANT = "irrelevant"
+
+
+class Relevance(StrEnum):
+    """Оценка LLM: относится ли статья к теме, которая её нашла."""
+
+    RELEVANT = "relevant"
+    PARTIAL = "partial"
+    IRRELEVANT = "irrelevant"
 
 
 class DigestStatus(StrEnum):
@@ -34,6 +44,17 @@ class DigestStatus(StrEnum):
     PARTIALLY_SENT = "partially_sent"
     FAILED = "failed"
     EMPTY = "empty"
+
+
+class DigestContent(StrEnum):
+    """Что печатается в карточке статьи дайджеста."""
+
+    # только краткая аннотация
+    ABSTRACT = "abstract"
+    # аннотация, затем разделы резюме (задача, метод, результаты, значимость)
+    FULL = "full"
+    # только разделы резюме
+    SUMMARY = "summary"
 
 
 class DeliveryStatus(StrEnum):

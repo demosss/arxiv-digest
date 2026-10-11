@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.models.enums import DeliveryStatus, DigestStatus
+from app.models.enums import DeliveryStatus, DigestContent, DigestStatus
 from app.schemas.common import ORMModel, Timestamps
 
 
@@ -12,6 +12,7 @@ class DigestOut(Timestamps):
     period_end: datetime
     papers_count: int
     status: DigestStatus
+    content: DigestContent
     error: str | None
     has_pdf: bool
     filename: str | None

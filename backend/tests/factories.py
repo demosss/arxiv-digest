@@ -51,18 +51,29 @@ class FakeSource:
         self,
         results: dict[str, list[ArxivEntry]] | None = None,
         failing_ids: set[str] | None = None,
+        failing_queries: set[str] | None = None,
     ) -> None:
         self.results = results or {}
         self.failing_ids = failing_ids or set()
+        # подстроки запросов, на которые arXiv отвечает ошибкой
+        self.failing_queries = failing_queries or set()
         self.queries: list[str] = []
+        self.limits: list[int] = []
         self.downloads: list[str] = []
 
     def search(self, query: str, max_results: int) -> list[ArxivEntry]:
         self.queries.append(query)
+        self.limits.append(max_results)
+        if any(needle in query for needle in self.failing_queries):
+            raise ArxivError("arXiv API вернул ошибку: incorrect query")
         for needle, entries in self.results.items():
             if needle in query:
                 return entries[:max_results]
         return []
+
+    def search_page(self, query: str, max_results: int) -> tuple[list[ArxivEntry], int]:
+        entries = self.search(query, 10_000)
+        return entries[:max_results], len(entries)
 
     def download_pdf(self, url: str, destination: Path) -> int:
         self.downloads.append(url)
@@ -81,6 +92,12 @@ RUSSIAN_SUMMARY = (
     "по сравнению с базовой моделью.\n\n"
     "Значимость: работа показывает, что качество рассуждений можно повысить без дообучения."
 )
+RUSSIAN_ABSTRACT = (
+    "Авторы исследуют, как большие языковые модели справляются с многошаговыми рассуждениями. "
+    "Предложен подход, в котором модель сначала строит план, а затем выполняет его по шагам. "
+    "На двенадцати наборах данных точность выросла на 7,5 процентных пункта. "
+    "Метод не требует дообучения и применим к уже развёрнутым моделям."
+)
 RUSSIAN_NOTE = "Конспект фрагмента: описан метод планирования и результаты на 12 бенчмарках."
 
 
@@ -97,6 +114,8 @@ class FakeLLM:
         self.calls.append({"system": system, "user": user, "purpose": purpose})
         if self.replies:
             reply = self.replies.pop(0)
+        elif purpose == "abstract":
+            reply = RUSSIAN_ABSTRACT
         else:
             reply = RUSSIAN_SUMMARY if purpose in ("summary", "reduce") else RUSSIAN_NOTE
         if isinstance(reply, Exception):

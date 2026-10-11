@@ -5,7 +5,8 @@ from httpx import AsyncClient
 
 TOPIC = {
     "name": "Большие языковые модели",
-    "keywords": ["large language model", "LLM"],
+    "description": "Языковые модели и агенты",
+    "queries": ['all:"large language model"', "all:LLM"],
     "arxiv_categories": ["cs.CL", "cs.AI"],
 }
 
@@ -15,7 +16,8 @@ async def test_topic_crud(auth_client: AsyncClient) -> None:
     assert created.status_code == 201
     topic = created.json()
     assert topic["is_active"] is True
-    assert topic["keywords"] == TOPIC["keywords"]
+    assert topic["queries"] == TOPIC["queries"]
+    assert topic["description"] == TOPIC["description"]
     topic_id = topic["id"]
 
     fetched = await auth_client.get(f"/api/topics/{topic_id}")
@@ -23,10 +25,12 @@ async def test_topic_crud(auth_client: AsyncClient) -> None:
     assert fetched.json() == topic
 
     updated = await auth_client.patch(
-        f"/api/topics/{topic_id}", json={"keywords": ["diffusion"], "is_active": False}
+        f"/api/topics/{topic_id}",
+        json={"queries": ["ti:diffusion"], "is_active": False, "description": ""},
     )
     assert updated.status_code == 200
-    assert updated.json()["keywords"] == ["diffusion"]
+    assert updated.json()["queries"] == ["ti:diffusion"]
+    assert updated.json()["description"] is None
     assert updated.json()["is_active"] is False
     assert updated.json()["name"] == TOPIC["name"]
 
@@ -39,15 +43,15 @@ async def test_topic_crud(auth_client: AsyncClient) -> None:
     assert (await auth_client.delete(f"/api/topics/{topic_id}")).status_code == 404
 
 
-async def test_topic_normalizes_keywords(auth_client: AsyncClient) -> None:
+async def test_topic_normalizes_queries(auth_client: AsyncClient) -> None:
     response = await auth_client.post(
         "/api/topics",
-        json={"name": "  RAG  ", "keywords": ['  "retrieval  augmented" ', "RAG", "rag", ""]},
+        json={"name": "  RAG  ", "queries": ["  all:a   AND all:b ", "all:RAG", "all:rag", ""]},
     )
 
     assert response.status_code == 201
     assert response.json()["name"] == "RAG"
-    assert response.json()["keywords"] == ["retrieval augmented", "RAG"]
+    assert response.json()["queries"] == ["all:a AND all:b", "all:RAG"]
     assert response.json()["arxiv_categories"] == []
 
 
@@ -63,8 +67,8 @@ async def test_topic_name_must_be_unique(auth_client: AsyncClient) -> None:
 @pytest.mark.parametrize(
     "patch",
     [
-        {"keywords": []},
-        {"keywords": ["  "]},
+        {"queries": []},
+        {"queries": ["  "]},
         {"name": "   "},
         {"arxiv_categories": ["not a category"]},
         {"arxiv_categories": ["CS.CL"]},
@@ -81,7 +85,7 @@ async def test_topic_list_filters_and_pagination(auth_client: AsyncClient) -> No
     for index in range(5):
         await auth_client.post(
             "/api/topics",
-            json={"name": f"Тема {index}", "keywords": ["k"], "is_active": index % 2 == 0},
+            json={"name": f"Тема {index}", "queries": ["all:k"], "is_active": index % 2 == 0},
         )
 
     page = await auth_client.get("/api/topics", params={"limit": 2, "offset": 2})

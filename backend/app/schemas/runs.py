@@ -3,9 +3,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import RunStatus, RunTrigger, TaskType
+from app.models.enums import DigestContent, RunStatus, RunTrigger, TaskType
 from app.schemas.common import Timestamps
 from app.services.periods import InvalidPeriodError, resolve_period, run_params
+
+# задачи, в которых собирается PDF
+DIGEST_CONTENT_TASKS = frozenset({TaskType.FULL_PIPELINE, TaskType.BUILD_DIGEST})
 
 
 class RunCreate(BaseModel):
@@ -19,6 +22,14 @@ class RunCreate(BaseModel):
     force: bool = Field(default=False, description="Для send_digest: отправить повторно")
     retry_failed: bool = Field(
         default=False, description="Для summarize: взять и статьи, упавшие на суммаризации"
+    )
+    fill_abstracts: bool = Field(
+        default=False,
+        description="Для summarize: только дописать аннотации статьям, у которых резюме уже есть",
+    )
+    digest_content: DigestContent | None = Field(
+        default=None,
+        description="Для full_pipeline и build_digest: состав карточки (иначе DIGEST_CONTENT)",
     )
 
     @model_validator(mode="after")
@@ -41,6 +52,11 @@ class RunCreate(BaseModel):
             params["force"] = True
         if self.retry_failed:
             params["retry_failed"] = True
+        # в цепочке full_pipeline этот флаг подменил бы суммаризацию новых статей
+        if self.fill_abstracts and self.task_type == TaskType.SUMMARIZE:
+            params["fill_abstracts"] = True
+        if self.digest_content is not None and self.task_type in DIGEST_CONTENT_TASKS:
+            params["digest_content"] = self.digest_content.value
         return params
 
 

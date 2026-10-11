@@ -60,6 +60,7 @@ async def test_public_settings(auth_client: AsyncClient, client: AsyncClient) ->
     assert body["timezone"] == "Europe/Moscow"
     assert body["llm_model"] == "test-model"
     assert body["send_empty_digest"] is False
+    assert body["digest_content"] == "full"
     # секретов в ответе нет
     assert not [key for key in body if "password" in key or "key" in key or "secret" in key]
 

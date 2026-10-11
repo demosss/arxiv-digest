@@ -7,8 +7,12 @@ export interface Page<T> {
   offset: number;
 }
 
+export interface DeletedCount {
+  deleted: number;
+}
+
 export interface ApiErrorBody {
-  detail: string | { loc: (string | number)[]; msg: string; type?: string }[];
+  detail: string | { loc: (string | number)[]; msg: string; type?: string; position?: number }[];
   code: string;
 }
 
@@ -32,6 +36,7 @@ export interface PublicSettings {
   llm_context_chars: number;
   arxiv_max_results_per_topic: number;
   send_empty_digest: boolean;
+  digest_content: DigestContent;
   pipeline_stale_hours: number;
 }
 
@@ -40,7 +45,8 @@ export interface PublicSettings {
 export interface Topic {
   id: number;
   name: string;
-  keywords: string[];
+  description: string | null;
+  queries: string[];
   arxiv_categories: string[];
   is_active: boolean;
   created_at: string;
@@ -49,9 +55,72 @@ export interface Topic {
 
 export interface TopicInput {
   name: string;
-  keywords: string[];
+  description: string | null;
+  queries: string[];
   arxiv_categories: string[];
   is_active: boolean;
+}
+
+/** Замечание к поисковому запросу; position — индекс символа (с нуля) в нормализованной строке. */
+export interface QueryIssue {
+  position: number;
+  message: string;
+}
+
+export interface QueryValidation {
+  normalized: string;
+  errors: QueryIssue[];
+  warnings: QueryIssue[];
+}
+
+export interface TopicPreviewInput {
+  queries: string[];
+  categories: string[];
+  days: number;
+}
+
+export interface PreviewExample {
+  arxiv_id: string;
+  title: string;
+  published_at: string;
+  abs_url: string;
+}
+
+export interface PreviewQueryResult {
+  query: string;
+  total: number;
+  examples: PreviewExample[];
+  error: string | null;
+}
+
+export interface TopicPreview {
+  days: number;
+  period_start: string;
+  period_end: string;
+  queries: PreviewQueryResult[];
+  unique_total: number;
+  unique_is_lower_bound: boolean;
+}
+
+export type TopicImportMode = 'merge' | 'replace';
+
+export interface ImportIssue {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  position?: number | null;
+  topic?: string | null;
+}
+
+export interface TopicImportReport {
+  mode: TopicImportMode;
+  dry_run: boolean;
+  applied: boolean;
+  created: string[];
+  updated: string[];
+  unchanged: string[];
+  deleted: string[];
+  errors: ImportIssue[];
 }
 
 export interface Recipient {
@@ -157,6 +226,8 @@ export interface RunCreate {
   paper_ids?: number[];
   force?: boolean;
   retry_failed?: boolean;
+  fill_abstracts?: boolean;
+  digest_content?: DigestContent;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical';
@@ -179,12 +250,19 @@ export interface LogPage {
 
 // --- Статьи ---
 
-export type PaperStatus = 'new' | 'downloaded' | 'text_extracted' | 'summarized' | 'failed';
+export type PaperStatus =
+  'new' | 'downloaded' | 'text_extracted' | 'summarized' | 'failed' | 'irrelevant';
+
+// оценка LLM: относится ли статья к теме, которая её нашла
+export type Relevance = 'relevant' | 'partial' | 'irrelevant';
 
 export interface PaperTopic {
   id: number;
   name: string;
   matched_keywords: string[];
+  matched_queries: string[];
+  relevance: Relevance | null;
+  relevance_reason: string | null;
 }
 
 export interface Paper {
@@ -207,6 +285,8 @@ export interface Paper {
 
 export interface Summary {
   text_ru: string;
+  // краткая аннотация; null — резюме создано до её появления
+  abstract_ru: string | null;
   model: string;
   prompt_tokens: number;
   completion_tokens: number;
@@ -227,6 +307,8 @@ export interface PaperDetail extends Paper {
 
 export type DigestStatus = 'building' | 'ready' | 'sent' | 'partially_sent' | 'failed' | 'empty';
 export type DeliveryStatus = 'pending' | 'sent' | 'failed';
+// что печатается в карточке статьи: аннотация, аннотация и разделы резюме, только разделы
+export type DigestContent = 'abstract' | 'full' | 'summary';
 
 export interface Digest {
   id: number;
@@ -234,6 +316,7 @@ export interface Digest {
   period_end: string;
   papers_count: number;
   status: DigestStatus;
+  content: DigestContent;
   error: string | null;
   has_pdf: boolean;
   filename: string | null;

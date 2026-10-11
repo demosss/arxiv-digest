@@ -7,11 +7,8 @@ import pytest
 from app.services.arxiv_client import (
     MAX_ATTEMPTS,
     ArxivClient,
-    ArxivEntry,
     ArxivError,
     ArxivUnavailableError,
-    build_search_query,
-    match_keywords,
     parse_feed,
     pdf_filename,
 )
@@ -52,49 +49,6 @@ def _client(handler: httpx.MockTransport, sleeps: list[float] | None = None) -> 
         sleep=recorded.append,
         backoff_base=1,
     )
-
-
-# --- построение запроса ---
-
-
-def test_query_combines_keywords_categories_and_period() -> None:
-    query = build_search_query(
-        ["large language model", "LLM", "retrieval-augmented generation"],
-        ["cs.CL", "cs.AI"],
-        START,
-        END,
-    )
-
-    assert query == (
-        '(all:"large language model" OR all:LLM OR all:"retrieval-augmented generation")'
-        " AND (cat:cs.CL OR cat:cs.AI)"
-        " AND submittedDate:[202410050000 TO 202410052359]"
-    )
-
-
-def test_query_without_categories_and_with_quotes_in_keywords() -> None:
-    query = build_search_query(['"diffusion  model"'], [], START, END)
-
-    assert query == '(all:"diffusion model") AND submittedDate:[202410050000 TO 202410052359]'
-
-
-def test_query_converts_period_to_utc() -> None:
-    from zoneinfo import ZoneInfo
-
-    moscow = ZoneInfo("Europe/Moscow")
-    query = build_search_query(
-        ["LLM"],
-        [],
-        datetime(2024, 10, 5, 3, 0, tzinfo=moscow),
-        datetime(2024, 10, 6, 2, 59, tzinfo=moscow),
-    )
-
-    assert "submittedDate:[202410050000 TO 202410052359]" in query
-
-
-def test_query_requires_keywords() -> None:
-    with pytest.raises(ArxivError):
-        build_search_query(["  "], ["cs.CL"], START, END)
 
 
 # --- парсинг Atom ---
@@ -146,15 +100,6 @@ def test_parse_feed_raises_on_api_error_entry() -> None:
 def test_parse_feed_raises_on_garbage() -> None:
     with pytest.raises(ArxivError):
         parse_feed(b"<html><body>Rate exceeded.</body></html")
-
-
-def test_match_keywords_is_case_insensitive() -> None:
-    entry: ArxivEntry = parse_feed(FEED)[0][0]
-
-    assert match_keywords(entry, ["Large Language Model", "diffusion", "tool use"]) == [
-        "Large Language Model",
-        "tool use",
-    ]
 
 
 # --- HTTP: пагинация, ретраи, скачивание ---

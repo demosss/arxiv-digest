@@ -27,7 +27,6 @@ RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 HTTP_TIMEOUT = httpx.Timeout(60.0, connect=15.0)
 
 _ARXIV_ID_RE = re.compile(r"arxiv\.org/abs/(?P<id>.+?)(?:v(?P<version>\d+))?$")
-_DATE_FORMAT = "%Y%m%d%H%M"
 
 
 class ArxivError(Exception):
@@ -52,34 +51,19 @@ class ArxivEntry:
     abs_url: str
 
 
-def _keyword_term(keyword: str) -> str:
-    keyword = " ".join(keyword.replace('"', " ").split())
-    return f'all:"{keyword}"' if " " in keyword else f"all:{keyword}"
+def build_query_url(search_query: str, start: int, max_results: int) -> str:
+    """Полный URL запроса к arXiv API; `httpx` кодирует пробелы, кавычки, скобки и двоеточия."""
+    return str(httpx.URL(ARXIV_API_URL, params=_query_params(search_query, start, max_results)))
 
 
-def build_search_query(
-    keywords: list[str],
-    categories: list[str],
-    period_start: datetime,
-    period_end: datetime,
-) -> str:
-    """Запрос вида `(all:"a b" OR all:c) AND (cat:cs.CL OR cat:cs.AI) AND submittedDate:[..]`."""
-    terms = [_keyword_term(k) for k in keywords if k.strip()]
-    if not terms:
-        raise ArxivError("У темы нет ключевых слов")
-    parts = [f"({' OR '.join(terms)})"]
-    if categories:
-        parts.append(f"({' OR '.join(f'cat:{c}' for c in categories)})")
-    start = period_start.astimezone(UTC).strftime(_DATE_FORMAT)
-    end = period_end.astimezone(UTC).strftime(_DATE_FORMAT)
-    parts.append(f"submittedDate:[{start} TO {end}]")
-    return " AND ".join(parts)
-
-
-def match_keywords(entry: ArxivEntry, keywords: list[str]) -> list[str]:
-    """Ключевые слова темы, которые встречаются в названии или аннотации статьи."""
-    haystack = f"{entry.title}\n{entry.abstract}".lower()
-    return [k for k in keywords if k.lower() in haystack]
+def _query_params(search_query: str, start: int, max_results: int) -> dict[str, str | int]:
+    return {
+        "search_query": search_query,
+        "start": start,
+        "max_results": max_results,
+        "sortBy": "submittedDate",
+        "sortOrder": "descending",
+    }
 
 
 def _collapse(text: str) -> str:
@@ -199,14 +183,9 @@ class ArxivClient:
         raise ArxivUnavailableError(f"{what}: {last_error} после {MAX_ATTEMPTS} попыток ({url})")
 
     def _fetch_page(self, query: str, start: int, size: int) -> tuple[list[ArxivEntry], int]:
-        params: dict[str, str | int] = {
-            "search_query": query,
-            "start": start,
-            "max_results": size,
-            "sortBy": "submittedDate",
-            "sortOrder": "descending",
-        }
-        url = str(httpx.URL(ARXIV_API_URL, params=params))
+        params = _query_params(query, start, size)
+        url = build_query_url(query, start, size)
+        log.debug("arxiv_request", url=url)
 
         def action() -> tuple[list[ArxivEntry], int]:
             response = self._http.get(
@@ -220,8 +199,12 @@ class ArxivClient:
             return parse_feed(response.content)
 
         entries, total = self._with_retries("Запрос к arXiv API", url, action)
-        log.info("arxiv_page", url=url, start=start, received=len(entries), total=total)
+        log.info("arxiv_page", query=query, start=start, received=len(entries), total=total)
         return entries, total
+
+    def search_page(self, query: str, max_results: int) -> tuple[list[ArxivEntry], int]:
+        """Первая страница выдачи и общее число результатов (`totalResults`)."""
+        return self._fetch_page(query, 0, min(PAGE_SIZE, max_results))
 
     def search(self, query: str, max_results: int) -> list[ArxivEntry]:
         """Все результаты запроса (не больше `max_results`), постранично по PAGE_SIZE."""

@@ -2,23 +2,21 @@ import {
   ActionIcon,
   Badge,
   Button,
+  Code,
+  FileButton,
   Group,
-  Modal,
   Stack,
   Switch,
   Table,
-  TagsInput,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconDownload, IconPencil, IconPlus, IconTrash, IconUpload } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
-import { z } from 'zod';
+import { useState } from 'react';
 
-import { createTopic, deleteTopic, listTopics, updateTopic } from '../api/endpoints';
+import { deleteTopic, exportTopicsYaml, listTopics, updateTopic } from '../api/endpoints';
 import type { Topic } from '../api/types';
 import {
   PageHeader,
@@ -27,137 +25,34 @@ import {
   confirmDelete,
   usePagination,
 } from '../components/common';
-import { POPULAR_ARXIV_CATEGORIES } from '../lib/labels';
+import { TopicEditor } from '../components/TopicEditor';
+import { TopicImportModal } from '../components/TopicImportModal';
 import { notifySuccess } from '../lib/queryClient';
 
-const CATEGORY_RE = /^[a-z][a-z-]*(\.[A-Za-z][A-Za-z-]*)?$/;
+const MAX_QUERIES_IN_TOOLTIP = 12;
 
-const schema = z.object({
-  name: z.string().trim().min(1, 'Введите название').max(255),
-  keywords: z.array(z.string()).min(1, 'Добавьте хотя бы одно ключевое слово'),
-  arxiv_categories: z
-    .array(z.string())
-    .refine((items) => items.every((item) => CATEGORY_RE.test(item)), {
-      message: 'Категория должна выглядеть как cs.CL',
-    }),
-  is_active: z.boolean(),
-});
-
-type TopicForm = z.infer<typeof schema>;
-
-const EMPTY: TopicForm = { name: '', keywords: [], arxiv_categories: [], is_active: true };
-
-function TopicModal({
-  topic,
-  opened,
-  onClose,
-}: {
-  topic: Topic | null;
-  opened: boolean;
-  onClose: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const form = useForm<TopicForm>({ resolver: zodResolver(schema), defaultValues: EMPTY });
-  const { reset } = form;
-
-  useEffect(() => {
-    if (opened) {
-      reset(
-        topic
-          ? {
-              name: topic.name,
-              keywords: topic.keywords,
-              arxiv_categories: topic.arxiv_categories,
-              is_active: topic.is_active,
-            }
-          : EMPTY,
-      );
-    }
-  }, [opened, topic, reset]);
-
-  const mutation = useMutation({
-    mutationFn: (values: TopicForm) =>
-      topic ? updateTopic(topic.id, values) : createTopic(values),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['topics'] });
-      notifySuccess(topic ? 'Тема обновлена' : 'Тема создана');
-      onClose();
-    },
-  });
-  const { errors } = form.formState;
-
+function QueriesCount({ queries }: { queries: string[] }) {
   return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title={topic ? 'Редактирование темы' : 'Новая тема'}
-      centered
-      size="lg"
-    >
-      <form onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
-        <Stack>
-          <TextInput
-            label="Название"
-            placeholder="Большие языковые модели"
-            error={errors.name?.message}
-            {...form.register('name')}
-          />
-          <Controller
-            control={form.control}
-            name="keywords"
-            render={({ field }) => (
-              <TagsInput
-                label="Ключевые слова"
-                description="Слово или фраза; Enter — добавить. Статья подходит, если найдено любое из них"
-                placeholder="large language model"
-                value={field.value}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                error={errors.keywords?.message}
-                splitChars={[',', ';']}
-                clearable
-              />
-            )}
-          />
-          <Controller
-            control={form.control}
-            name="arxiv_categories"
-            render={({ field }) => (
-              <TagsInput
-                label="Категории arXiv"
-                description="Необязательно. Выберите из списка или введите свою, например cs.CL"
-                placeholder="cs.CL"
-                data={POPULAR_ARXIV_CATEGORIES}
-                value={field.value}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                error={errors.arxiv_categories?.message}
-                clearable
-              />
-            )}
-          />
-          <Controller
-            control={form.control}
-            name="is_active"
-            render={({ field }) => (
-              <Switch
-                label="Тема активна"
-                checked={field.value}
-                onChange={(event) => field.onChange(event.currentTarget.checked)}
-              />
-            )}
-          />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
-              Отмена
-            </Button>
-            <Button type="submit" loading={mutation.isPending}>
-              Сохранить
-            </Button>
-          </Group>
+    <Tooltip
+      multiline
+      maw={520}
+      label={
+        <Stack gap={2}>
+          {queries.slice(0, MAX_QUERIES_IN_TOOLTIP).map((query) => (
+            <Code key={query} fz={11} bg="transparent" c="inherit">
+              {query}
+            </Code>
+          ))}
+          {queries.length > MAX_QUERIES_IN_TOOLTIP ? (
+            <Text size="xs">и ещё {queries.length - MAX_QUERIES_IN_TOOLTIP}</Text>
+          ) : null}
         </Stack>
-      </form>
-    </Modal>
+      }
+    >
+      <Badge variant="light" color={queries.length ? 'blue' : 'red'}>
+        {queries.length}
+      </Badge>
+    </Tooltip>
   );
 }
 
@@ -166,7 +61,8 @@ export function TopicsPage() {
   const pagination = usePagination();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Topic | null>(null);
-  const [modalOpened, setModalOpened] = useState(false);
+  const [editorOpened, setEditorOpened] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['topics', pagination.page, search],
@@ -185,10 +81,11 @@ export function TopicsPage() {
       notifySuccess('Тема удалена');
     },
   });
+  const exportYaml = useMutation({ mutationFn: exportTopicsYaml });
 
-  const openModal = (topic: Topic | null) => {
+  const openEditor = (topic: Topic | null) => {
     setEditing(topic);
-    setModalOpened(true);
+    setEditorOpened(true);
   };
 
   return (
@@ -202,7 +99,27 @@ export function TopicsPage() {
             pagination.setPage(1);
           }}
         />
-        <Button leftSection={<IconPlus size={16} />} onClick={() => openModal(null)}>
+        <Button
+          variant="default"
+          leftSection={<IconDownload size={16} />}
+          loading={exportYaml.isPending}
+          onClick={() => exportYaml.mutate()}
+        >
+          Экспорт YAML
+        </Button>
+        {/* key сбрасывает кнопку, чтобы тот же файл можно было выбрать повторно */}
+        <FileButton
+          key={importFile ? 'selected' : 'idle'}
+          accept=".yaml,.yml,application/x-yaml,text/yaml"
+          onChange={setImportFile}
+        >
+          {(props) => (
+            <Button variant="default" leftSection={<IconUpload size={16} />} {...props}>
+              Импорт YAML
+            </Button>
+          )}
+        </FileButton>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => openEditor(null)}>
           Добавить тему
         </Button>
       </PageHeader>
@@ -217,7 +134,7 @@ export function TopicsPage() {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Название</Table.Th>
-              <Table.Th>Ключевые слова</Table.Th>
+              <Table.Th>Запросов</Table.Th>
               <Table.Th>Категории arXiv</Table.Th>
               <Table.Th>Активна</Table.Th>
               <Table.Th w={90} />
@@ -226,15 +143,18 @@ export function TopicsPage() {
           <Table.Tbody>
             {data?.items.map((topic) => (
               <Table.Tr key={topic.id}>
-                <Table.Td fw={500}>{topic.name}</Table.Td>
+                <Table.Td maw={520}>
+                  <Text size="sm" fw={500}>
+                    {topic.name}
+                  </Text>
+                  {topic.description ? (
+                    <Text size="xs" c="dimmed" lineClamp={2}>
+                      {topic.description}
+                    </Text>
+                  ) : null}
+                </Table.Td>
                 <Table.Td>
-                  <Group gap={4}>
-                    {topic.keywords.map((keyword) => (
-                      <Badge key={keyword} variant="light" tt="none">
-                        {keyword}
-                      </Badge>
-                    ))}
-                  </Group>
+                  <QueriesCount queries={topic.queries} />
                 </Table.Td>
                 <Table.Td>
                   {topic.arxiv_categories.length ? (
@@ -263,7 +183,7 @@ export function TopicsPage() {
                     <ActionIcon
                       variant="subtle"
                       aria-label="Редактировать"
-                      onClick={() => openModal(topic)}
+                      onClick={() => openEditor(topic)}
                     >
                       <IconPencil size={16} />
                     </ActionIcon>
@@ -290,7 +210,8 @@ export function TopicsPage() {
         />
       </QueryState>
 
-      <TopicModal topic={editing} opened={modalOpened} onClose={() => setModalOpened(false)} />
+      <TopicEditor topic={editing} opened={editorOpened} onClose={() => setEditorOpened(false)} />
+      <TopicImportModal file={importFile} onClose={() => setImportFile(null)} />
     </>
   );
 }

@@ -18,13 +18,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
 import { cancelRun, getRun } from '../api/endpoints';
-import type { Run } from '../api/types';
+import type { DigestContent, Run } from '../api/types';
 import { RunStatusBadge } from '../components/Badges';
 import { Field, PageHeader, QueryState } from '../components/common';
 import { LogsViewer } from '../components/LogsViewer';
 import { formatDuration } from '../lib/dates';
 import { useFormat } from '../lib/format';
-import { RUN_TRIGGER_LABELS, TASK_TYPE_LABELS, statLabel } from '../lib/labels';
+import {
+  DIGEST_CONTENT_LABELS,
+  RUN_TRIGGER_LABELS,
+  TASK_TYPE_LABELS,
+  statLabel,
+} from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
 const PARAM_ORDER = ['period_start', 'period_end'];
@@ -179,7 +184,9 @@ export function RunDetailPage() {
                       <Text span c="dark" inherit>
                         {key.startsWith('period_') && typeof value === 'string'
                           ? fmt.dateTime(value)
-                          : JSON.stringify(value)}
+                          : key === 'digest_content' && typeof value === 'string'
+                            ? (DIGEST_CONTENT_LABELS[value as DigestContent] ?? value)
+                            : JSON.stringify(value)}
                       </Text>
                     </Text>
                   ))}

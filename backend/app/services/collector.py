@@ -15,10 +15,10 @@ from app.models import Paper, PaperStatus, PaperTopic, Topic
 from app.services.arxiv_client import (
     ArxivEntry,
     ArxivError,
-    build_search_query,
-    match_keywords,
+    ArxivUnavailableError,
     pdf_filename,
 )
+from app.services.arxiv_query import build_search_query, check_query, format_issues
 from app.services.pdf_text import ExtractedText, TextExtractionError, extract_text
 
 log = get_logger(__name__)
@@ -31,18 +31,49 @@ class ArxivSource(Protocol):
 
 
 @dataclass
-class TopicStats:
+class QueryStats:
     found: int = 0
     new: int = 0
     duplicates: int = 0
-    download_errors: int = 0
+    errors: int = 0
+    error: str | None = None
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "found": self.found,
+            "new": self.new,
+            "duplicates": self.duplicates,
+            "errors": self.errors,
+        }
+        if self.error:
+            data["error"] = self.error
+        return data
+
+
+@dataclass
+class TopicStats:
+    """`found` — уникальные статьи темы, `duplicates` — те из них, что уже были в БД."""
+
+    found: int = 0
+    new: int = 0
+    duplicates: int = 0
+    errors: int = 0
+    download_errors: int = 0
+    zero_result_queries: int = 0
+    limit_reached: bool = False
+    # нормализованный запрос -> его статистика
+    queries: dict[str, QueryStats] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
         return {
             "found": self.found,
             "new": self.new,
             "duplicates": self.duplicates,
+            "errors": self.errors,
             "download_errors": self.download_errors,
+            "zero_result_queries": self.zero_result_queries,
+            "limit_reached": self.limit_reached,
+            "queries": {query: stats.as_dict() for query, stats in self.queries.items()},
         }
 
 
@@ -54,6 +85,7 @@ class CollectStats:
     papers_found: int = 0
     papers_new: int = 0
     duplicates: int = 0
+    query_errors: int = 0
     download_errors: int = 0
     text_extracted: int = 0
 
@@ -65,6 +97,7 @@ class CollectStats:
             "papers_found": self.papers_found,
             "papers_new": self.papers_new,
             "duplicates": self.duplicates,
+            "query_errors": self.query_errors,
             "download_errors": self.download_errors,
             "text_extracted": self.text_extracted,
             "topics": {name: stats.as_dict() for name, stats in self.topics.items()},
@@ -75,6 +108,9 @@ def _needs_processing(paper: Paper) -> bool:
     """Новые статьи и те, чья обработка в прошлый раз оборвалась до извлечения текста."""
     if paper.status in (PaperStatus.NEW, PaperStatus.DOWNLOADED):
         return True
+    if paper.status == PaperStatus.IRRELEVANT:
+        # отброшенную статью нашла ещё одна тема: текст нужен снова, чтобы оценить её для этой темы
+        return any(link.relevance is None for link in paper.topic_links)
     return paper.status == PaperStatus.FAILED and paper.text_chars is None
 
 
@@ -112,6 +148,7 @@ class Collector:
         stats.papers_found = len(found)
         stats.papers_new = sum(t.new for t in stats.topics.values())
         stats.duplicates = sum(t.duplicates for t in stats.topics.values())
+        stats.query_errors = sum(t.errors for t in stats.topics.values())
 
         for paper_id, topic_names in found.items():
             paper = self._session.get_one(Paper, paper_id)
@@ -129,6 +166,7 @@ class Collector:
             papers_found=stats.papers_found,
             papers_new=stats.papers_new,
             duplicates=stats.duplicates,
+            query_errors=stats.query_errors,
             download_errors=stats.download_errors,
             text_extracted=stats.text_extracted,
         )
@@ -137,54 +175,137 @@ class Collector:
     def _collect_topic(
         self, topic: Topic, period_start: datetime, period_end: datetime, stats: TopicStats
     ) -> list[int]:
-        query = build_search_query(topic.keywords, topic.arxiv_categories, period_start, period_end)
-        log.info("collect_topic_started", topic=topic.name, topic_id=topic.id, query=query)
-        entries = self._source.search(query, self._max_results)
-        stats.found = len(entries)
+        """Выполняет запросы темы по одному; лимит результатов действует на тему в целом."""
+        log.info(
+            "collect_topic_started", topic=topic.name, topic_id=topic.id, queries=len(topic.queries)
+        )
+        # paper_id -> запросы темы, которые нашли статью (в порядке срабатывания)
+        matched: dict[int, list[str]] = {}
+        zero_results: list[str] = []
 
-        paper_ids: list[int] = []
-        for entry in entries:
-            paper = self._session.scalar(select(Paper).where(Paper.arxiv_id == entry.arxiv_id))
-            if paper is None:
-                paper = Paper(
-                    arxiv_id=entry.arxiv_id,
-                    version=entry.version,
-                    title=entry.title,
-                    authors=entry.authors,
-                    abstract=entry.abstract,
-                    categories=entry.categories,
-                    published_at=entry.published_at,
-                    updated_at_arxiv=entry.updated_at,
-                    pdf_url=entry.pdf_url,
-                    abs_url=entry.abs_url,
-                    status=PaperStatus.NEW,
+        for raw_query in topic.queries:
+            check = check_query(raw_query)
+            key = check.normalized or raw_query
+            if key in stats.queries:
+                continue
+            query_stats = stats.queries.setdefault(key, QueryStats())
+
+            if not check.ok:
+                query_stats.errors = 1
+                query_stats.error = f"Некорректный запрос: {format_issues(check.errors)}"
+                log.error(
+                    "collect_query_invalid",
+                    topic=topic.name,
+                    query=raw_query,
+                    error=query_stats.error,
                 )
-                self._session.add(paper)
-                self._session.flush()
-                stats.new += 1
-            else:
-                # статья уже известна: по другой теме или из прошлого запуска
-                stats.duplicates += 1
+                continue
 
-            link = self._session.get(PaperTopic, (paper.id, topic.id))
-            matched = match_keywords(entry, topic.keywords)
+            remaining = self._max_results - len(matched)
+            if remaining <= 0:
+                query_stats.error = "Пропущен: достигнут лимит результатов на тему"
+                continue
+
+            search_query = build_search_query(
+                check.normalized, topic.arxiv_categories, period_start, period_end
+            )
+            log.info(
+                "collect_query_started",
+                topic=topic.name,
+                query=check.normalized,
+                search_query=search_query,
+            )
+            try:
+                entries = self._source.search(search_query, remaining)
+            except ArxivUnavailableError:
+                # arXiv недоступен целиком: шаг повторит Celery
+                raise
+            except ArxivError as exc:
+                query_stats.errors = 1
+                query_stats.error = str(exc)
+                log.error(
+                    "collect_query_failed",
+                    topic=topic.name,
+                    query=check.normalized,
+                    error=str(exc),
+                )
+                continue
+
+            for entry in entries:
+                paper, created = self._get_or_create_paper(entry)
+                if created:
+                    query_stats.new += 1
+                else:
+                    # статья уже известна: по другому запросу, другой теме или из прошлого запуска
+                    query_stats.duplicates += 1
+                matched.setdefault(paper.id, []).append(check.normalized)
+            query_stats.found = len(entries)
+            if not entries:
+                zero_results.append(check.normalized)
+            log.info(
+                "collect_query_done",
+                topic=topic.name,
+                query=check.normalized,
+                found=query_stats.found,
+                new=query_stats.new,
+                duplicates=query_stats.duplicates,
+            )
+
+            if len(matched) >= self._max_results and not stats.limit_reached:
+                stats.limit_reached = True
+                log.warning(
+                    "collect_topic_limit_reached", topic=topic.name, limit=self._max_results
+                )
+
+        for paper_id, queries in matched.items():
+            link = self._session.get(PaperTopic, (paper_id, topic.id))
             if link is None:
                 self._session.add(
-                    PaperTopic(paper_id=paper.id, topic_id=topic.id, matched_keywords=matched)
+                    PaperTopic(paper_id=paper_id, topic_id=topic.id, matched_queries=queries)
                 )
             else:
-                link.matched_keywords = matched
-            paper_ids.append(paper.id)
-
+                # накапливаем: статья могла быть найдена другими запросами в прошлых запусках
+                link.matched_queries = list(dict.fromkeys([*link.matched_queries, *queries]))
         self._session.commit()
+
+        stats.found = len(matched)
+        stats.new = sum(q.new for q in stats.queries.values())
+        stats.duplicates = stats.found - stats.new
+        stats.errors = sum(q.errors for q in stats.queries.values())
+        stats.zero_result_queries = len(zero_results)
         log.info(
             "collect_topic_done",
             topic=topic.name,
             found=stats.found,
             new=stats.new,
             duplicates=stats.duplicates,
+            errors=stats.errors,
+            limit_reached=stats.limit_reached,
         )
-        return paper_ids
+        if zero_results:
+            log.info("collect_topic_zero_results", topic=topic.name, queries=zero_results)
+        return list(matched)
+
+    def _get_or_create_paper(self, entry: ArxivEntry) -> tuple[Paper, bool]:
+        paper = self._session.scalar(select(Paper).where(Paper.arxiv_id == entry.arxiv_id))
+        if paper is not None:
+            return paper, False
+        paper = Paper(
+            arxiv_id=entry.arxiv_id,
+            version=entry.version,
+            title=entry.title,
+            authors=entry.authors,
+            abstract=entry.abstract,
+            categories=entry.categories,
+            published_at=entry.published_at,
+            updated_at_arxiv=entry.updated_at,
+            pdf_url=entry.pdf_url,
+            abs_url=entry.abs_url,
+            status=PaperStatus.NEW,
+        )
+        self._session.add(paper)
+        self._session.flush()
+        return paper, True
 
     def _process_paper(self, paper: Paper) -> bool:
         """Скачивает PDF и извлекает текст. Ошибка одной статьи не прерывает сбор."""

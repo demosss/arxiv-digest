@@ -1,4 +1,4 @@
-"""Суммаризация полного текста статьи: чанкинг по абзацам и map-reduce."""
+"""Суммаризация статьи: краткая аннотация и резюме полного текста (чанкинг и map-reduce)."""
 
 import re
 from dataclasses import dataclass
@@ -6,6 +6,7 @@ from typing import Protocol
 
 from app.core.logging import get_logger
 from app.services import prompts
+from app.services.latex_text import latex_to_text
 from app.services.llm_client import LLMError, LLMResponse
 
 log = get_logger(__name__)
@@ -15,6 +16,11 @@ MIN_SUMMARY_CHARS = 200
 MIN_NOTE_CHARS = 20
 # доля кириллицы среди букв, ниже которой резюме считается написанным не по-русски
 MIN_CYRILLIC_SHARE = 0.5
+# сколько символов начала статьи просматривается в поисках авторской аннотации, если на arXiv её нет
+ABSTRACT_SOURCE_CHARS = 6000
+
+# модель иногда начинает аннотацию со слова «Аннотация:»
+_ABSTRACT_LABEL_RE = re.compile(r"^аннотация\s*[:.—–-]\s*", re.IGNORECASE)
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?…])\s+")
@@ -37,8 +43,19 @@ class ChatModel(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class AbstractResult:
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    duration_ms: int
+    llm_calls: int
+
+
+@dataclass(frozen=True, slots=True)
 class SummaryResult:
     text: str
+    # краткая аннотация одним абзацем
+    abstract: str
     model: str
     prompt_tokens: int
     completion_tokens: int
@@ -116,7 +133,7 @@ def split_into_chunks(
 
 
 def clean_response(text: str) -> str:
-    """Убирает рассуждения <think>, Markdown-разметку и лишние пустые строки."""
+    """Убирает рассуждения <think>, Markdown, код формул LaTeX и лишние пустые строки."""
     text = _THINK_RE.sub("", text)
     # незакрытый <think>: модель упёрлась в лимит токенов, не дойдя до ответа
     if "<think>" in text.lower():
@@ -124,6 +141,7 @@ def clean_response(text: str) -> str:
     text = re.sub(r"^```\w*\s*$", "", text, flags=re.MULTILINE)
     text = re.sub(r"(\*\*|__)", "", text)
     text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = latex_to_text(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" ?\n ?", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -161,6 +179,8 @@ class Summarizer:
             raise LLMError("У статьи нет текста для суммаризации")
         log.info("summarize_started", chunks=len(chunks), text_chars=len(full_text))
 
+        # аннотация — один короткий запрос: если модель не справится, map-reduce не тратится зря
+        abstract_ru = self._abstract(title, abstract, full_text, usage)
         if len(chunks) == 1:
             prompt = prompts.SINGLE_PROMPT.format(title=title, abstract=abstract, text=chunks[0])
             text = self._ask(prompt, purpose="summary", final=True, usage=usage)
@@ -193,6 +213,7 @@ class Summarizer:
         )
         return SummaryResult(
             text=text,
+            abstract=abstract_ru,
             model=self._llm.model,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
@@ -200,6 +221,30 @@ class Summarizer:
             chunks_count=len(chunks),
             llm_calls=usage.calls,
         )
+
+    def summarize_abstract(self, title: str, abstract: str, full_text: str) -> AbstractResult:
+        """Только краткая аннотация — для статей, у которых резюме уже есть."""
+        usage = _Usage()
+        text = self._abstract(title, abstract, full_text, usage)
+        return AbstractResult(
+            text=text,
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            duration_ms=usage.duration_ms,
+            llm_calls=usage.calls,
+        )
+
+    def _abstract(self, title: str, abstract: str, full_text: str, usage: "_Usage") -> str:
+        """Аннотация одним абзацем: по аннотации с arXiv, а если её нет — по началу статьи."""
+        if abstract.strip():
+            prompt = prompts.ABSTRACT_PROMPT.format(title=title, abstract=abstract.strip())
+        else:
+            head = full_text.strip()[: min(ABSTRACT_SOURCE_CHARS, self._context_chars)]
+            if not head:
+                raise LLMError("У статьи нет ни аннотации, ни текста для суммаризации")
+            prompt = prompts.ABSTRACT_FROM_TEXT_PROMPT.format(title=title, text=head)
+        text = self._ask(prompt, purpose="abstract", final=True, usage=usage)
+        return _ABSTRACT_LABEL_RE.sub("", " ".join(text.split()))
 
     def _collapse(self, title: str, notes: list[str], usage: "_Usage") -> list[str]:
         """Пока конспекты не помещаются в один запрос, сжимает их группами."""

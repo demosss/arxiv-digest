@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.models.enums import PaperStatus
+from app.models.enums import PaperStatus, Relevance
 from app.schemas.common import ORMModel, Timestamps
 
 
@@ -10,10 +10,14 @@ class PaperTopicOut(BaseModel):
     id: int
     name: str
     matched_keywords: list[str]
+    matched_queries: list[str]
+    relevance: Relevance | None
+    relevance_reason: str | None
 
 
 class SummaryOut(Timestamps):
     text_ru: str
+    abstract_ru: str | None
     model: str
     prompt_tokens: int
     completion_tokens: int

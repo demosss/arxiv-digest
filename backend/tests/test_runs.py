@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.models import Paper, RunStatus, RunTrigger, TaskLog, TaskRun, TaskType, Topic
+from app.schemas.runs import RunCreate
 from app.services import runs
 from app.services.arxiv_client import ArxivUnavailableError
 from app.services.periods import previous_utc_day
@@ -56,7 +57,7 @@ def _run(db: Session, **kwargs: Any) -> TaskRun:
 
 
 def _topic(db: Session) -> None:
-    db.add(Topic(name="LLM", keywords=["large language model"], arxiv_categories=[]))
+    db.add(Topic(name="LLM", queries=['all:"large language model"'], arxiv_categories=[]))
     db.commit()
 
 
@@ -330,6 +331,21 @@ async def test_manual_run_validation(
     assert published == []
 
 
+def test_step_specific_params_reach_only_their_tasks() -> None:
+    def params(task_type: str, **extra: Any) -> dict[str, Any]:
+        return RunCreate.model_validate({"task_type": task_type, **extra}).to_params()
+
+    assert params("build_digest", digest_content="abstract")["digest_content"] == "abstract"
+    assert params("full_pipeline", digest_content="full")["digest_content"] == "full"
+    assert "digest_content" not in params("build_digest")
+    assert "digest_content" not in params("collect", digest_content="abstract")
+    assert params("summarize", fill_abstracts=True) == {"fill_abstracts": True}
+    # в цепочке флаг подменил бы суммаризацию новых статей
+    assert "fill_abstracts" not in params("full_pipeline", fill_abstracts=True)
+    with pytest.raises(ValueError, match="digest_content"):
+        params("build_digest", digest_content="everything")
+
+
 async def test_broker_failure_marks_run_failed(
     auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -504,3 +520,42 @@ async def test_cancel_run(
     again = await auth_client.post(f"/api/runs/{steps[0].id}/cancel")
     assert again.status_code == 409
     assert again.json()["code"] == "run_not_active"
+
+
+async def test_delete_run_removes_steps_and_logs(auth_client: AsyncClient, db: Session) -> None:
+    parent, steps = _pipeline(db)
+    db.add(TaskLog(run_id=steps[0].id, level="info", logger="app", message="collect_started"))
+    db.commit()
+
+    active = await auth_client.delete(f"/api/runs/{parent.id}")
+    assert active.status_code == 409
+    assert active.json()["code"] == "run_active"
+
+    for step in steps:
+        runs.finish_run(db, step, RunStatus.SUCCESS)
+
+    parent_id = parent.id
+    assert (await auth_client.delete(f"/api/runs/{parent_id}")).status_code == 204
+    db.expire_all()
+    assert db.scalars(select(TaskRun)).all() == []
+    assert db.scalars(select(TaskLog)).all() == []
+    assert (await auth_client.delete(f"/api/runs/{parent_id}")).status_code == 404
+
+
+async def test_clear_runs_respects_filters_and_keeps_active(
+    auth_client: AsyncClient, db: Session
+) -> None:
+    active_pipeline, _ = _pipeline(db)
+    failed, done, queued = _run(db), _run(db), _run(db)
+    runs.finish_run(db, failed, RunStatus.FAILED, error="boom")
+    runs.finish_run(db, done, RunStatus.SUCCESS)
+
+    only_failed = await auth_client.delete("/api/runs", params={"status": "failed"})
+    assert only_failed.status_code == 200
+    assert only_failed.json() == {"deleted": 1}
+
+    assert (await auth_client.delete("/api/runs")).json() == {"deleted": 1}
+
+    remaining = (await auth_client.get("/api/runs")).json()
+    assert [r["id"] for r in remaining["items"]] == [queued.id, active_pipeline.id]
+    assert (await auth_client.get(f"/api/runs/{active_pipeline.id}")).json()["children"]

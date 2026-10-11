@@ -5,15 +5,15 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
-from app.api.runs import launch_manual_run, load_run
+from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
 from app.core.errors import ConflictError, NotFoundError
 from app.models import Digest, DigestPaper, DigestStatus, TaskRun, TaskType, Topic
-from app.schemas.common import Page
+from app.schemas.common import DeletedCount, Page
 from app.schemas.digests import (
     DeliveryOut,
     DigestDetail,
@@ -23,6 +23,7 @@ from app.schemas.digests import (
 )
 from app.schemas.runs import RunDetail
 from app.services.audit import audit
+from app.services.files import remove_files
 
 router = APIRouter(prefix="/digests", tags=["digests"])
 
@@ -42,6 +43,7 @@ def _to_out(digest: Digest) -> DigestOut:
         period_end=digest.period_end,
         papers_count=digest.papers_count,
         status=digest.status,
+        content=digest.content,
         error=digest.error,
         has_pdf=pdf is not None,
         filename=pdf.name if pdf else None,
@@ -65,6 +67,19 @@ async def load_digest(session: AsyncSession, digest_id: int) -> Digest:
     return digest
 
 
+def _conditions(
+    digest_status: DigestStatus | None, date_from: datetime | None, date_to: datetime | None
+) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = []
+    if digest_status is not None:
+        conditions.append(Digest.status == digest_status)
+    if date_from is not None:
+        conditions.append(Digest.period_start >= date_from)
+    if date_to is not None:
+        conditions.append(Digest.period_end <= date_to)
+    return conditions
+
+
 @router.get("", response_model=Page[DigestOut])
 async def list_digests(
     session: SessionDep,
@@ -73,13 +88,11 @@ async def list_digests(
     date_from: Annotated[datetime | None, Query(description="Период начинается не раньше")] = None,
     date_to: Annotated[datetime | None, Query(description="Период кончается не позже")] = None,
 ) -> Page[DigestOut]:
-    stmt = select(Digest).order_by(Digest.period_end.desc(), Digest.id.desc())
-    if digest_status is not None:
-        stmt = stmt.where(Digest.status == digest_status)
-    if date_from is not None:
-        stmt = stmt.where(Digest.period_start >= date_from)
-    if date_to is not None:
-        stmt = stmt.where(Digest.period_end <= date_to)
+    stmt = (
+        select(Digest)
+        .where(*_conditions(digest_status, date_from, date_to))
+        .order_by(Digest.period_end.desc(), Digest.id.desc())
+    )
     items, total = await paginate(session, stmt, pagination)
     return Page(
         items=[_to_out(d) for d in items],
@@ -87,6 +100,28 @@ async def list_digests(
         limit=pagination.limit,
         offset=pagination.offset,
     )
+
+
+@router.delete("", response_model=DeletedCount)
+async def clear_digests(
+    session: SessionDep,
+    user: CurrentUser,
+    digest_status: Annotated[DigestStatus | None, Query(alias="status")] = None,
+    date_from: Annotated[datetime | None, Query(description="Период начинается не раньше")] = None,
+    date_to: Annotated[datetime | None, Query(description="Период кончается не позже")] = None,
+) -> DeletedCount:
+    """Удаляет дайджесты под фильтрами (без фильтров — все) вместе с PDF и историей доставки."""
+    await ensure_no_active_runs(session)
+    result = await session.execute(
+        delete(Digest)
+        .where(*_conditions(digest_status, date_from, date_to))
+        .returning(Digest.pdf_path)
+    )
+    pdf_paths = result.scalars().all()
+    await session.commit()
+    files = await run_in_threadpool(remove_files, pdf_paths)
+    audit("clear", "digest", None, user.username, deleted=len(pdf_paths), files_removed=files)
+    return DeletedCount(deleted=len(pdf_paths))
 
 
 @router.get("/{digest_id}", response_model=DigestDetail)
@@ -113,6 +148,31 @@ async def get_digest(digest_id: int, session: SessionDep) -> DigestDetail:
             for item in digest.papers
         ],
         deliveries=[DeliveryOut.model_validate(d) for d in digest.deliveries],
+    )
+
+
+@router.delete("/{digest_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_digest(digest_id: int, session: SessionDep, user: CurrentUser) -> None:
+    """Удаляет дайджест с PDF-файлом и историей доставки; сами статьи остаются."""
+    await ensure_no_active_runs(session)
+    row = (
+        await session.execute(
+            delete(Digest)
+            .where(Digest.id == digest_id)
+            .returning(Digest.pdf_path, Digest.period_start, Digest.period_end)
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Дайджест не найден")
+    await session.commit()
+    await run_in_threadpool(remove_files, [row.pdf_path])
+    audit(
+        "delete",
+        "digest",
+        digest_id,
+        user.username,
+        period_start=row.period_start.isoformat(),
+        period_end=row.period_end.isoformat(),
     )
 
 

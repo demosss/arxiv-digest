@@ -48,7 +48,11 @@ services:
       context: ./backend
     environment:
       SERVICE_NAME: api
-    # миграции → создание админа → API
+    volumes:
+      - data:/data
+      # темы для первого запуска (импортируются, пока таблица topics пуста)
+      - ./seed_topics.yaml:/seed/seed_topics.yaml:ro
+    # миграции → создание админа и начальных тем → API
     command: >
       sh -c "alembic upgrade head
       && python -m app.cli init

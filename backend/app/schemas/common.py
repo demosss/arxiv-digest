@@ -14,6 +14,12 @@ class Page[T](BaseModel):
     offset: int
 
 
+class DeletedCount(BaseModel):
+    """Результат массовой очистки."""
+
+    deleted: int
+
+
 class Timestamps(ORMModel):
     created_at: datetime
     updated_at: datetime

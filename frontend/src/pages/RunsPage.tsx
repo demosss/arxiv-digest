@@ -1,18 +1,25 @@
-import { Anchor, Button, Group, Select, Table, Text } from '@mantine/core';
+import { ActionIcon, Anchor, Button, Group, Select, Table, Text } from '@mantine/core';
 import { DatePickerInput, type DatesRangeValue } from '@mantine/dates';
-import { IconPlayerPlay } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
+import { IconPlayerPlay, IconTrash } from '@tabler/icons-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { listRuns, type RunFilters } from '../api/endpoints';
-import type { RunStatus, RunTrigger, TaskType } from '../api/types';
+import { clearRuns, deleteRun, listRuns, type RunFilters } from '../api/endpoints';
+import type { Run, RunStatus, RunTrigger, TaskType } from '../api/types';
 import { RunStatusBadge } from '../components/Badges';
-import { PageHeader, QueryState, TablePagination, usePagination } from '../components/common';
+import {
+  PageHeader,
+  QueryState,
+  TablePagination,
+  confirmDelete,
+  usePagination,
+} from '../components/common';
 import { LaunchRunModal } from '../components/LaunchRunModal';
 import { formatDuration } from '../lib/dates';
 import { useFormat } from '../lib/format';
 import { RUN_STATUS, RUN_TRIGGER_LABELS, TASK_TYPE_LABELS, TASK_TYPE_OPTIONS } from '../lib/labels';
+import { notifySuccess } from '../lib/queryClient';
 
 const STATUS_OPTIONS = (Object.keys(RUN_STATUS) as RunStatus[]).map((value) => ({
   value,
@@ -59,9 +66,46 @@ export function RunsPage() {
 
   const resetPage = () => pagination.setPage(1);
 
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['runs'] });
+    void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+  const remove = useMutation({
+    mutationFn: (run: Run) => deleteRun(run.id),
+    onSuccess: () => {
+      invalidate();
+      notifySuccess('Запуск удалён');
+    },
+  });
+  const clear = useMutation({
+    mutationFn: () => clearRuns(filters),
+    onSuccess: ({ deleted }) => {
+      resetPage();
+      invalidate();
+      notifySuccess(`Удалено запусков: ${deleted}`);
+    },
+  });
+  const hasFilters = Object.values(filters).some((value) => value !== undefined);
+
   return (
     <>
       <PageHeader title="Запуски">
+        <Button
+          color="red"
+          variant="light"
+          leftSection={<IconTrash size={16} />}
+          loading={clear.isPending}
+          disabled={!data?.total}
+          onClick={() =>
+            confirmDelete(
+              `${hasFilters ? 'завершённые запуски под текущими фильтрами' : 'все завершённые запуски'} вместе с логами (активные останутся)`,
+              () => clear.mutate(),
+            )
+          }
+        >
+          Очистить историю
+        </Button>
         <Button leftSection={<IconPlayerPlay size={16} />} onClick={() => setLaunchOpened(true)}>
           Запустить вручную
         </Button>
@@ -136,6 +180,7 @@ export function RunsPage() {
               <Table.Th>Создан</Table.Th>
               <Table.Th>Длительность</Table.Th>
               <Table.Th>Комментарий</Table.Th>
+              <Table.Th w={50} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -157,6 +202,19 @@ export function RunsPage() {
                   <Text size="sm" c={run.status === 'failed' ? 'red' : 'dimmed'} lineClamp={2}>
                     {run.error ?? ''}
                   </Text>
+                </Table.Td>
+                <Table.Td>
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    aria-label="Удалить"
+                    disabled={run.status === 'queued' || run.status === 'running'}
+                    onClick={() =>
+                      confirmDelete(`запуск №${run.id} вместе с логами`, () => remove.mutate(run))
+                    }
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
                 </Table.Td>
               </Table.Tr>
             ))}

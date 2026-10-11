@@ -14,18 +14,31 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
-import { IconChevronDown, IconDownload, IconEye, IconSend } from '@tabler/icons-react';
+import { IconChevronDown, IconDownload, IconEye, IconSend, IconTrash } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { downloadDigestPdf, getDigest, listDigests, resendDigest } from '../api/endpoints';
+import {
+  clearDigests,
+  deleteDigest,
+  downloadDigestPdf,
+  getDigest,
+  listDigests,
+  resendDigest,
+} from '../api/endpoints';
 import type { Digest, DigestStatus } from '../api/types';
 import { DeliveryStatusBadge, DigestStatusBadge } from '../components/Badges';
-import { PageHeader, QueryState, TablePagination, usePagination } from '../components/common';
+import {
+  PageHeader,
+  QueryState,
+  TablePagination,
+  confirmDelete,
+  usePagination,
+} from '../components/common';
 import { formatPeriod } from '../lib/dates';
 import { useFormat } from '../lib/format';
-import { DIGEST_STATUS } from '../lib/labels';
+import { DIGEST_CONTENT_LABELS, DIGEST_STATUS } from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
 const STATUS_OPTIONS = (Object.keys(DIGEST_STATUS) as DigestStatus[]).map((value) => ({
@@ -111,7 +124,8 @@ function DigestDrawer({ digestId, onClose }: { digestId: number | null; onClose:
           <Group gap="sm">
             <DigestStatusBadge status={digest.status} size="lg" />
             <Text size="sm" c="dimmed">
-              Статей: {digest.papers_count} · обновлён {fmt.dateTime(digest.updated_at)}
+              Статей: {digest.papers_count} · {DIGEST_CONTENT_LABELS[digest.content].toLowerCase()}{' '}
+              · обновлён {fmt.dateTime(digest.updated_at)}
             </Text>
           </Group>
           <Group gap="sm">
@@ -217,6 +231,29 @@ export function DigestsPage() {
   const [status, setStatus] = useState<DigestStatus | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const { download } = useDigestActions();
+  const queryClient = useQueryClient();
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['digests'] });
+    void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+  const remove = useMutation({
+    mutationFn: (digest: Digest) => deleteDigest(digest.id),
+    onSuccess: (_, digest) => {
+      if (selected === digest.id) setSelected(null);
+      invalidate();
+      notifySuccess('Дайджест удалён');
+    },
+  });
+  const clear = useMutation({
+    mutationFn: () => clearDigests({ status: status ?? undefined }),
+    onSuccess: ({ deleted }) => {
+      setSelected(null);
+      pagination.setPage(1);
+      invalidate();
+      notifySuccess(`Удалено дайджестов: ${deleted}`);
+    },
+  });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['digests', 'list', pagination.page, status],
@@ -244,6 +281,21 @@ export function DigestsPage() {
           w={220}
           aria-label="Статус дайджеста"
         />
+        <Button
+          color="red"
+          variant="light"
+          leftSection={<IconTrash size={16} />}
+          loading={clear.isPending}
+          disabled={!data?.total}
+          onClick={() =>
+            confirmDelete(
+              `${status ? 'дайджесты с выбранным статусом' : 'все дайджесты'} (${data?.total ?? 0}) вместе с PDF-файлами и историей доставки`,
+              () => clear.mutate(),
+            )
+          }
+        >
+          Очистить
+        </Button>
       </PageHeader>
 
       <QueryState
@@ -257,9 +309,10 @@ export function DigestsPage() {
             <Table.Tr>
               <Table.Th>Период (UTC)</Table.Th>
               <Table.Th>Статей</Table.Th>
+              <Table.Th>Состав карточек</Table.Th>
               <Table.Th>Статус</Table.Th>
               <Table.Th>Обновлён</Table.Th>
-              <Table.Th w={130} />
+              <Table.Th w={160} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -276,6 +329,7 @@ export function DigestsPage() {
                   </Anchor>
                 </Table.Td>
                 <Table.Td>{digest.papers_count}</Table.Td>
+                <Table.Td>{DIGEST_CONTENT_LABELS[digest.content]}</Table.Td>
                 <Table.Td>
                   <DigestStatusBadge status={digest.status} />
                 </Table.Td>
@@ -303,6 +357,21 @@ export function DigestsPage() {
                       </ActionIcon>
                     </Tooltip>
                     {digest.has_pdf ? <ResendButton digest={digest} compact /> : null}
+                    <Tooltip label="Удалить">
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        aria-label="Удалить"
+                        onClick={() =>
+                          confirmDelete(
+                            `дайджест за ${formatPeriod(digest.period_start, digest.period_end)}`,
+                            () => remove.mutate(digest),
+                          )
+                        }
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    </Tooltip>
                   </Group>
                 </Table.Td>
               </Table.Tr>

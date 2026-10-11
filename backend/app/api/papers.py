@@ -3,18 +3,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
-from app.api.runs import launch_manual_run, load_run
+from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
 from app.core.errors import ConflictError, NotFoundError
 from app.models import Paper, PaperStatus, PaperTopic, TaskRun, TaskType
-from app.schemas.common import Page
+from app.schemas.common import DeletedCount, Page
 from app.schemas.papers import PaperDetail, PaperOut, PaperTopicOut, SummaryOut
 from app.schemas.runs import RunDetail
 from app.services.audit import audit
+from app.services.files import remove_files
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
@@ -27,7 +28,12 @@ _LOAD_OPTIONS = (
 def _topics(paper: Paper) -> list[PaperTopicOut]:
     return [
         PaperTopicOut(
-            id=link.topic_id, name=link.topic.name, matched_keywords=link.matched_keywords
+            id=link.topic_id,
+            name=link.topic.name,
+            matched_keywords=link.matched_keywords,
+            matched_queries=link.matched_queries,
+            relevance=link.relevance,
+            relevance_reason=link.relevance_reason,
         )
         for link in sorted(paper.topic_links, key=lambda link: link.topic.name)
     ]
@@ -60,6 +66,31 @@ async def _load_paper(session: AsyncSession, paper_id: int) -> Paper:
     return paper
 
 
+def _conditions(
+    topic_id: int | None,
+    paper_status: PaperStatus | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    q: str | None,
+) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = []
+    if topic_id is not None:
+        conditions.append(
+            Paper.id.in_(select(PaperTopic.paper_id).where(PaperTopic.topic_id == topic_id))
+        )
+    if paper_status is not None:
+        conditions.append(Paper.status == paper_status)
+    if date_from is not None:
+        conditions.append(Paper.published_at >= date_from)
+    if date_to is not None:
+        conditions.append(Paper.published_at <= date_to)
+    if q:
+        conditions.append(
+            Paper.title.icontains(q, autoescape=True) | Paper.arxiv_id.icontains(q, autoescape=True)
+        )
+    return conditions
+
+
 @router.get("", response_model=Page[PaperOut])
 async def list_papers(
     session: SessionDep,
@@ -71,22 +102,11 @@ async def list_papers(
     q: Annotated[str | None, Query(description="Поиск по названию и arXiv ID")] = None,
 ) -> Page[PaperOut]:
     stmt = (
-        select(Paper).options(*_LOAD_OPTIONS).order_by(Paper.published_at.desc(), Paper.id.desc())
+        select(Paper)
+        .options(*_LOAD_OPTIONS)
+        .where(*_conditions(topic_id, paper_status, date_from, date_to, q))
+        .order_by(Paper.published_at.desc(), Paper.id.desc())
     )
-    if topic_id is not None:
-        stmt = stmt.where(
-            Paper.id.in_(select(PaperTopic.paper_id).where(PaperTopic.topic_id == topic_id))
-        )
-    if paper_status is not None:
-        stmt = stmt.where(Paper.status == paper_status)
-    if date_from is not None:
-        stmt = stmt.where(Paper.published_at >= date_from)
-    if date_to is not None:
-        stmt = stmt.where(Paper.published_at <= date_to)
-    if q:
-        stmt = stmt.where(
-            Paper.title.icontains(q, autoescape=True) | Paper.arxiv_id.icontains(q, autoescape=True)
-        )
     items, total = await paginate(session, stmt, pagination)
     return Page(
         items=[_to_out(p) for p in items],
@@ -94,6 +114,30 @@ async def list_papers(
         limit=pagination.limit,
         offset=pagination.offset,
     )
+
+
+@router.delete("", response_model=DeletedCount)
+async def clear_papers(
+    session: SessionDep,
+    user: CurrentUser,
+    topic_id: int | None = None,
+    paper_status: Annotated[PaperStatus | None, Query(alias="status")] = None,
+    date_from: Annotated[datetime | None, Query(description="Опубликована не раньше")] = None,
+    date_to: Annotated[datetime | None, Query(description="Опубликована не позже")] = None,
+    q: Annotated[str | None, Query(description="Поиск по названию и arXiv ID")] = None,
+) -> DeletedCount:
+    """Удаляет статьи под фильтрами (без фильтров — все) вместе с резюме и PDF-файлами."""
+    await ensure_no_active_runs(session)
+    result = await session.execute(
+        delete(Paper)
+        .where(*_conditions(topic_id, paper_status, date_from, date_to, q))
+        .returning(Paper.pdf_path)
+    )
+    pdf_paths = result.scalars().all()
+    await session.commit()
+    files = await run_in_threadpool(remove_files, pdf_paths)
+    audit("clear", "paper", None, user.username, deleted=len(pdf_paths), files_removed=files)
+    return DeletedCount(deleted=len(pdf_paths))
 
 
 @router.get("/{paper_id}", response_model=PaperDetail)
@@ -106,6 +150,22 @@ async def get_paper(paper_id: int, session: SessionDep) -> PaperDetail:
         updated_at=paper.updated_at,
         summary=SummaryOut.model_validate(paper.summary) if paper.summary else None,
     )
+
+
+@router.delete("/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_paper(paper_id: int, session: SessionDep, user: CurrentUser) -> None:
+    """Удаляет статью с резюме и PDF-файлом; из состава дайджестов она тоже исчезает."""
+    await ensure_no_active_runs(session)
+    row = (
+        await session.execute(
+            delete(Paper).where(Paper.id == paper_id).returning(Paper.arxiv_id, Paper.pdf_path)
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFoundError("Статья не найдена")
+    await session.commit()
+    await run_in_threadpool(remove_files, [row.pdf_path])
+    audit("delete", "paper", paper_id, user.username, arxiv_id=row.arxiv_id)
 
 
 @router.post(
