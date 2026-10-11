@@ -140,9 +140,16 @@ export interface RecipientInput {
 
 // --- Расписания ---
 
-// translate запускается только из карточки статьи: в расписаниях и ручном запуске его нет
+// translate и send_paper запускаются только из карточки статьи: в расписаниях и ручном
+// запуске их нет
 export type TaskType =
-  'full_pipeline' | 'collect' | 'summarize' | 'build_digest' | 'send_digest' | 'translate';
+  | 'full_pipeline'
+  | 'collect'
+  | 'summarize'
+  | 'build_digest'
+  | 'send_digest'
+  | 'translate'
+  | 'send_paper';
 
 export interface Schedule {
   id: number;
@@ -304,6 +311,14 @@ export interface PaperDetail extends Paper {
   updated_at: string;
   summary: Summary | null;
   translations: Translation[];
+  // сохранён ли PDF статьи: без него исходник нельзя отправить по почте
+  has_pdf: boolean;
+}
+
+export interface PaperSendInput {
+  recipient_ids: number[];
+  include_pdf: boolean;
+  translation_ids: number[];
 }
 
 // --- Переводы ---

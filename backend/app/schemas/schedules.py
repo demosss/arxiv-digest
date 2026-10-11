@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.enums import TaskType
+from app.models.enums import PAPER_TASKS, TaskType
 from app.schemas.common import Timestamps
 from app.services.scheduler import DEFAULT_TIMEZONE, get_timezone, validate_cron
 
@@ -13,8 +13,8 @@ def _validate_timezone(value: str) -> str:
 
 
 def _validate_task_type(value: TaskType | None) -> TaskType | None:
-    if value == TaskType.TRANSLATE:
-        raise ValueError("Перевод статьи нельзя запускать по расписанию")
+    if value in PAPER_TASKS:
+        raise ValueError("Перевод и отправку статьи нельзя запускать по расписанию")
     return value
 
 

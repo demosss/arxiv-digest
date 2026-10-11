@@ -18,6 +18,7 @@ from app.tasks.pipeline import (
     build_digest_task,
     collect_task,
     send_digest_task,
+    send_paper_task,
     summarize_task,
     translate_task,
 )
@@ -30,6 +31,7 @@ STEP_TASKS: dict[TaskType, Task] = {
     TaskType.BUILD_DIGEST: build_digest_task,
     TaskType.SEND_DIGEST: send_digest_task,
     TaskType.TRANSLATE: translate_task,
+    TaskType.SEND_PAPER: send_paper_task,
 }
 PIPELINE_STEPS = (
     TaskType.COLLECT,

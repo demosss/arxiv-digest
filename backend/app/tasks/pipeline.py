@@ -16,6 +16,7 @@ from app.services.digest_builder import build_digest
 from app.services.llm_client import LLMClient
 from app.services.llm_summarizer import Summarizer
 from app.services.mailer import run_send_digest
+from app.services.paper_mailer import run_send_paper
 from app.services.periods import period_from_context, period_to_context
 from app.services.relevance import RelevanceJudge
 from app.services.summarization import fill_abstracts, summarize_papers
@@ -90,6 +91,18 @@ def _send_digest(session: Session, run: TaskRun, context: Context) -> StepResult
     if outcome.skip_reason:
         return StepResult(stats=stats, status=RunStatus.SKIPPED, note=outcome.skip_reason)
     return StepResult(stats=stats, context={"digest_id": outcome.digest_id})
+
+
+def _send_paper(session: Session, run: TaskRun, context: Context) -> StepResult:
+    stats = run_send_paper(
+        session,
+        get_settings(),
+        paper_id=int(context["paper_id"]),
+        recipient_ids=list(context.get("recipient_ids") or []),
+        include_pdf=bool(context.get("include_pdf")),
+        translation_ids=list(context.get("translation_ids") or []),
+    )
+    return StepResult(stats=stats.as_dict())
 
 
 def _translate(session: Session, run: TaskRun, context: Context) -> StepResult:
@@ -171,3 +184,15 @@ def send_digest_task(self: Task, context: Context | None = None, *, run_id: int)
 )
 def translate_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
     return execute_step(self, run_id, context, _translate)
+
+
+@celery_app.task(
+    name="pipeline.send_paper",
+    bind=True,
+    queue=QUEUE_MAIL,
+    acks_late=True,
+    soft_time_limit=HOUR,
+    time_limit=HOUR + 120,
+)
+def send_paper_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
+    return execute_step(self, run_id, context, _send_paper)

@@ -12,6 +12,7 @@ import type {
   Page,
   Paper,
   PaperDetail,
+  PaperSendInput,
   PaperStatus,
   PublicSettings,
   QueryValidation,
@@ -217,6 +218,9 @@ export const clearPapers = (filters: PaperFilters) =>
 
 export const translatePaper = (id: number, language: string) =>
   api.post<Translation>(`/papers/${id}/translate`, { language }).then((r) => r.data);
+
+export const sendPaper = (id: number, data: PaperSendInput) =>
+  api.post<RunDetail>(`/papers/${id}/send`, data).then((r) => r.data);
 
 // --- Переводы ---
 
