@@ -1,0 +1,101 @@
+# Темы для мониторинга arXiv — профиль «Computer Vision».
+#
+# Импорт: выберите профиль «Computer Vision» в шапке → «Темы» → «Импорт YAML» → этот файл.
+# Формат и правила записи запросов — те же, что в seed_topics.yaml.
+#
+# Как составлены запросы:
+#   - поиск идёт по ti: и abs:, а не по all: — иначе срабатывают фамилии авторов и комментарии;
+#   - у каждой темы заданы categories: они добавляются к каждому запросу и отсекают статьи
+#     из других областей (обработка сигналов, NLP, криптография), где встречаются те же слова;
+#   - arXiv не различает регистр и приводит слова к основе, поэтому короткие аббревиатуры
+#     (ORB, SURF, CNN, CLIP, PnP) используются только вместе с контекстом, а формы числа
+#     отдельно не перечисляются;
+#   - широкие термины (CNN, VLM, adversarial attack) ищутся в заголовке, а в аннотации —
+#     только в сочетании с уточняющими словами: так в тему попадают статьи, посвящённые ей,
+#     а не все, где термин упомянут мимоходом;
+#   - запросы идут от самых важных к второстепенным: лимит результатов действует на тему.
+#
+# Объём по выдаче arXiv за 28 дней (октябрь 2026): VLM — около 12 статей в сутки,
+# остальные темы — по 2–4. Если статей окажется много, сократить тему проще всего,
+# удалив её последние запросы: они самые широкие.
+# Темы 4 и 5 намеренно пересекаются: статья о защите от патчей попадёт в обе и будет
+# напечатана в дайджесте один раз, со ссылкой из второго раздела.
+
+topics:
+  - name: "Классические алгоритмы компьютерного зрения"
+    description: "Методы без глубокого обучения или с опорой на геометрию: локальные признаки и сопоставление изображений (SIFT, ORB, RANSAC), калибровка камер, стерео, structure from motion, визуальная одометрия и SLAM, оценка позы, фильтрация, выделение границ, морфология, оптический поток, трекинг фильтрами"
+    categories: ["cs.CV", "cs.RO", "eess.IV"]
+    is_active: true
+    queries:
+      # признаки и сопоставление
+      - 'ti:"image matching" OR ti:"keypoint detection" OR ti:"keypoint matching" OR ti:"feature descriptor" OR ti:"image registration" OR ti:"image stitching" OR (ti:"feature matching" AND (abs:keypoint OR abs:correspondence OR abs:pose OR abs:homography))'
+      - '(abs:SIFT OR abs:SURF OR abs:ORB OR abs:AKAZE OR abs:BRISK) AND (abs:keypoint OR abs:descriptor OR abs:"feature matching" OR abs:"image matching" OR abs:"feature extraction")'
+      - '(abs:RANSAC OR abs:"outlier rejection" OR abs:"robust estimation") AND (abs:homography OR abs:"fundamental matrix" OR abs:"essential matrix" OR abs:"epipolar" OR abs:"relative pose" OR abs:correspondences)'
+      - '(abs:"feature matching" OR abs:"image matching" OR abs:"keypoint detection" OR abs:"image registration") AND (abs:handcrafted OR abs:"hand-crafted" OR abs:"traditional methods" OR abs:homography OR abs:"geometric verification" OR abs:"epipolar")'
+      # геометрия и 3D
+      - 'ti:calibration AND (abs:camera OR abs:LiDAR) AND (abs:extrinsic OR abs:intrinsic OR abs:distortion OR abs:checkerboard OR abs:"hand-eye")'
+      - 'ti:"structure from motion" OR abs:"bundle adjustment" OR abs:"multi-view geometry" OR abs:"multiple view geometry" OR abs:"epipolar geometry"'
+      - 'ti:"visual odometry" OR ti:"visual SLAM" OR ti:"visual-inertial odometry" OR ti:"visual-inertial SLAM"'
+      - '(abs:"visual odometry" OR abs:"visual SLAM" OR abs:"visual-inertial") AND (abs:"feature-based" OR abs:"direct method" OR abs:keyframe OR abs:"loop closure" OR abs:"factor graph" OR abs:"bundle adjustment")'
+      - '(abs:"perspective-n-point" OR abs:PnP OR abs:"minimal solver" OR abs:"absolute pose" OR abs:"relative pose estimation") AND (abs:camera OR abs:"pose estimation")'
+      - 'abs:"stereo matching" OR abs:"semi-global matching" OR abs:"disparity estimation"'
+      - '(abs:"iterative closest point" OR abs:ICP) AND (abs:"point cloud" OR abs:registration)'
+      # обработка изображений
+      - 'ti:"edge detection" OR ti:"corner detection" OR ti:"line detection" OR ti:"line segment detection" OR ti:"image thresholding" OR ti:"contour detection"'
+      - 'abs:"Hough transform" OR abs:"Canny edge" OR abs:"mathematical morphology" OR abs:"morphological operations" OR abs:"Otsu thresholding" OR abs:"watershed algorithm"'
+      - '(abs:"bilateral filter" OR abs:"guided filter" OR abs:"non-local means" OR abs:BM3D OR abs:"median filter" OR abs:"total variation regularization" OR abs:"total variation denoising" OR abs:"block matching") AND (abs:image OR abs:denoising)'
+      - 'ti:"optical flow" OR abs:"Lucas-Kanade" OR abs:"Horn-Schunck"'
+      - '(abs:"Kalman filter" OR abs:"particle filter" OR abs:"correlation filter" OR abs:"mean shift") AND (abs:"object tracking" OR abs:"visual tracking" OR abs:"multi-object tracking")'
+
+  - name: "Свёрточные нейронные сети в компьютерном зрении"
+    description: "Архитектуры и применение свёрточных сетей (CNN) для задач зрения: новые свёрточные блоки и backbone-сети, большие ядра, эффективные и мобильные CNN, детекторы семейства YOLO, сравнение и гибриды CNN с трансформерами"
+    categories: ["cs.CV"]
+    is_active: true
+    queries:
+      - 'ti:"convolutional neural network" OR ti:"convolutional network" OR ti:CNN OR ti:ConvNet OR ti:convolution OR ti:convolutional'
+      - 'ti:ResNet OR ti:ConvNeXt OR ti:EfficientNet OR ti:MobileNet OR ti:RepVGG OR ti:"U-Net"'
+      - 'ti:YOLO OR abs:YOLOv5 OR abs:YOLOv8 OR abs:YOLOv10 OR abs:YOLOv11 OR abs:YOLO11 OR abs:YOLOv12'
+      - '(abs:"depthwise convolution" OR abs:"depthwise separable" OR abs:"large kernel" OR abs:"dilated convolution" OR abs:"deformable convolution" OR abs:"dynamic convolution" OR abs:"convolutional block") AND (abs:backbone OR abs:architecture OR abs:CNN)'
+      - '(abs:CNN OR abs:ConvNet OR abs:"convolutional neural network") AND (abs:"vision transformer" OR abs:ViT) AND (abs:hybrid OR abs:comparison OR abs:compared OR abs:outperforms)'
+      - '(abs:"convolutional neural network" OR abs:"convolutional neural networks" OR abs:CNN OR abs:CNNs) AND (abs:"image classification" OR abs:"object detection" OR abs:"semantic segmentation" OR abs:"image recognition") AND (abs:architecture OR abs:backbone OR abs:lightweight OR abs:efficient)'
+
+  - name: "VLM в компьютерном зрении"
+    description: "Vision-language модели и мультимодальные LLM для задач зрения: детекция, сегментация и классификация с открытым словарём, visual grounding, визуальные вопросы и ответы, CLIP-подобные модели, оценка и ограничения VLM на зрительных задачах"
+    categories: ["cs.CV"]
+    is_active: true
+    queries:
+      - 'ti:"vision-language model" OR ti:"vision language model" OR ti:VLM OR ti:"large vision-language model" OR ti:LVLM'
+      - 'ti:"multimodal large language model" OR ti:MLLM OR ti:"multimodal LLM" OR ti:"multi-modal large language model"'
+      - 'ti:CLIP AND (abs:"zero-shot" OR abs:"open-vocabulary" OR abs:"vision-language" OR abs:"image-text")'
+      - 'ti:"open-vocabulary" AND (abs:detection OR abs:segmentation OR abs:recognition)'
+      - 'ti:"visual grounding" OR ti:"referring expression" OR ti:"visual question answering" OR ti:"referring segmentation"'
+      - '(abs:"vision-language model" OR abs:VLM) AND (abs:"object detection" OR abs:"semantic segmentation" OR abs:"visual grounding" OR abs:"image classification" OR abs:"spatial reasoning" OR abs:"fine-grained recognition")'
+
+  - name: "Устойчивость моделей зрения к состязательным атакам"
+    description: "Защита алгоритмов и нейросетей компьютерного зрения от adversarial-атак: состязательное обучение, сертифицированная устойчивость, очистка и обнаружение состязательных примеров, защита от adversarial patch, оценка и бенчмарки устойчивости, в том числе для VLM"
+    categories: ["cs.CV", "cs.LG", "cs.CR"]
+    is_active: true
+    queries:
+      - '(ti:"adversarial robustness" OR ti:"adversarial training" OR ti:"adversarial defense" OR ti:"adversarial defence" OR ti:"adversarially robust" OR ti:"adversarial purification") AND (abs:image OR abs:vision OR abs:visual OR abs:"object detection" OR abs:segmentation OR abs:"point cloud" OR abs:video)'
+      - '(abs:"certified robustness" OR abs:"certified defense" OR abs:"randomized smoothing" OR abs:"provable robustness" OR abs:"robustness verification" OR abs:"robustness certification") AND (abs:image OR abs:vision OR abs:visual OR abs:"object detection" OR abs:segmentation OR abs:"point cloud")'
+      - '(abs:"adversarial patch" OR abs:"patch attack" OR abs:"physical adversarial") AND (abs:defense OR abs:defence OR abs:defend OR abs:certified OR abs:"robust against" OR abs:detecting)'
+      - '(abs:"adversarial training" OR abs:"adversarial purification" OR abs:"adversarial defense" OR abs:"adversarial defence") AND (abs:"image classification" OR abs:"object detection" OR abs:"semantic segmentation" OR abs:"vision transformer" OR abs:"face recognition" OR abs:"point cloud" OR abs:"image classifier")'
+      - '(abs:"adversarial robustness" OR abs:"adversarially robust" OR abs:"robust to adversarial" OR abs:"robustness against adversarial" OR abs:"robustness to adversarial") AND (abs:"image classification" OR abs:"image classifier" OR abs:"computer vision" OR abs:"vision transformer" OR abs:"object detection" OR abs:"semantic segmentation" OR abs:"point cloud" OR abs:"face recognition")'
+      - '(abs:"adversarial example detection" OR abs:"detecting adversarial" OR abs:"adversarial detection" OR abs:"detect adversarial") AND (abs:image OR abs:vision OR abs:visual)'
+      - '(abs:"vision-language model" OR abs:CLIP OR abs:"multimodal large language model" OR abs:VLM) AND (abs:"adversarial robustness" OR abs:"adversarial training" OR abs:"adversarially robust" OR abs:"adversarial defense")'
+      - '(abs:"robustness benchmark" OR abs:"robustness evaluation" OR abs:AutoAttack OR abs:RobustBench) AND (abs:"adversarial attack" OR abs:"adversarial robustness" OR abs:"adversarial perturbation") AND (abs:image OR abs:vision OR abs:visual)'
+
+  - name: "Состязательные атаки на модели зрения"
+    description: "Реализация adversarial-атак на алгоритмы и нейросети компьютерного зрения: в первую очередь физические атаки и adversarial patch (наклейки, камуфляж, одежда, атаки на камеры и лидары), а также цифровые — переносимые и black-box атаки на классификаторы, детекторы, сегментацию, распознавание лиц и VLM"
+    categories: ["cs.CV", "cs.LG", "cs.CR"]
+    is_active: true
+    queries:
+      # физические атаки и патчи — в приоритете
+      - 'ti:"adversarial patch" OR abs:"adversarial patch" OR abs:"adversarial patches" OR abs:"patch attack"'
+      - 'abs:"physical adversarial" OR abs:"physical-world adversarial" OR abs:"physical adversarial attack" OR abs:"adversarial camouflage" OR abs:"adversarial texture" OR abs:"adversarial sticker" OR abs:"adversarial decal" OR abs:"adversarial clothing" OR abs:"adversarial t-shirt"'
+      - '(abs:"physical attack" OR abs:"physical-world attack" OR abs:"real-world attack" OR abs:"physical world" OR abs:"physically realizable" OR abs:printable OR abs:printed) AND abs:adversarial AND (abs:"object detection" OR abs:"object detector" OR abs:camera OR abs:LiDAR OR abs:"traffic sign" OR abs:"face recognition" OR abs:"autonomous driving" OR abs:"person detection" OR abs:"depth estimation")'
+      # цифровые атаки
+      - '(ti:"adversarial attack" OR ti:"adversarial example" OR ti:"adversarial perturbation") AND (abs:image OR abs:vision OR abs:visual OR abs:"object detection" OR abs:segmentation OR abs:"point cloud" OR abs:video)'
+      - '(abs:"transferable adversarial" OR abs:"adversarial transferability" OR abs:"transfer-based attack" OR abs:"black-box attack" OR abs:"query-based attack" OR abs:"universal adversarial perturbation") AND (abs:image OR abs:vision OR abs:visual OR abs:"object detection" OR abs:segmentation)'
+      - '(abs:"adversarial attack" OR abs:"adversarial example" OR abs:"adversarial perturbation") AND (abs:"object detection" OR abs:"object detector" OR abs:"semantic segmentation" OR abs:"image classification" OR abs:"image classifier" OR abs:"vision transformer" OR abs:"face recognition" OR abs:"traffic sign" OR abs:LiDAR OR abs:"point cloud" OR abs:"optical flow" OR abs:"depth estimation" OR abs:"visual tracking")'
+      - '(abs:"vision-language model" OR abs:"multimodal large language model" OR abs:CLIP OR abs:VLM) AND (abs:"adversarial attack" OR abs:"adversarial image" OR abs:"adversarial perturbation" OR abs:"adversarial example" OR abs:"typographic attack" OR abs:"visual jailbreak")'
