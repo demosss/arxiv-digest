@@ -4,7 +4,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin
-from app.models.enums import DeliveryStatus, DigestStatus, enum_column
+from app.models.enums import DeliveryStatus, DigestContent, DigestStatus, enum_column
 from app.models.paper import Paper
 
 
@@ -22,6 +22,10 @@ class Digest(TimestampMixin, Base):
         DigestStatus, default=DigestStatus.BUILDING, server_default=DigestStatus.BUILDING.value
     )
     error: Mapped[str | None] = mapped_column(Text)
+    # состав карточек при последней сборке; дайджесты, собранные до появления аннотаций, — summary
+    content: Mapped[DigestContent] = enum_column(
+        DigestContent, default=DigestContent.SUMMARY, server_default=DigestContent.SUMMARY.value
+    )
 
     papers: Mapped[list["DigestPaper"]] = relationship(
         back_populates="digest", cascade="all, delete-orphan", order_by="DigestPaper.position"

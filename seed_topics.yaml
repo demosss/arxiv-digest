@@ -9,8 +9,16 @@
 #
 # ВАЖНО: arXiv ищет только по метаданным (заголовок, аннотация, авторы, комментарии), а не
 # по полному тексту, как Google Scholar. Поэтому узкие маркеры вроде "ISO 34503" или
-# "PAS 1883" почти всегда дадут 0 результатов за сутки. Такие запросы оставлены только там,
-# где термин реально встречается в аннотациях.
+# "PAS 1883" почти всегда дадут 0 результатов за сутки.
+#
+# Как составлены запросы, чтобы не собирать посторонние статьи:
+#   - поиск идёт по abs: и ti:, а не по all: — иначе срабатывают фамилии авторов и комментарии;
+#   - arXiv не различает регистр и приводит слова к основе: ODD находит «odd»,
+#     "autonomous train" — «autonomous training», locomotive — «locomotion». Поэтому
+#     аббревиатуры и многозначные слова (ODD, train, rail, vessel, certification)
+#     не используются сами по себе, а только вместе с контекстом предметной области;
+#   - формы единственного и множественного числа отдельно перечислять не нужно;
+#   - контекст «автономное вождение» задаётся фразами, а не словами autonomous / automated.
 
 topics:
   - name: "ODD — концепция, формализация, мониторинг"
@@ -18,90 +26,77 @@ topics:
     categories: []          # без ограничения — тема узкая
     is_active: true
     queries:
-      - 'all:"operational design domain"'
-      - 'all:"operational design domains"'
-      - 'abs:ODD AND (abs:autonomous OR abs:automated OR abs:"self-driving")'
-      - 'all:"operational domain" AND (all:autonomous OR all:automated)'
-      - 'all:"operational envelope" AND (all:autonomous OR all:unmanned)'
-      - 'all:"operating conditions" AND all:"automated driving" AND (all:specification OR all:ontology OR all:taxonomy)'
-      - 'all:OpenODD'
+      - 'ti:"operational design domain" OR abs:"operational design domain"'
+      - 'abs:ODD AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving")'
+      - 'abs:"operational domain" AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
+      - 'abs:"operational envelope" AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
+      - 'abs:"operating conditions" AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving") AND (abs:specification OR abs:ontology OR abs:taxonomy)'
+      - 'abs:OpenODD OR abs:"ISO 34503" OR abs:"PAS 1883"'
 
   - name: "Безопасность, верификация и сертификация автономного транспорта"
     description: "SOTIF, safety case, scenario-based testing, стандарты и сертификация"
     categories: []
     is_active: true
     queries:
-      - 'all:SOTIF'
-      - 'all:"ISO 21448"'
-      - 'all:"UL 4600"'
-      - 'all:"ISO 26262" AND (all:autonomous OR all:automated)'
-      - 'all:"safety case" AND (all:autonomous OR all:automated OR all:unmanned)'
-      - 'all:"safety assurance" AND (all:"autonomous vehicle" OR all:"automated driving" OR all:"autonomous ship" OR all:"autonomous train")'
-      - 'all:"scenario-based" AND (all:testing OR all:verification OR all:validation) AND (all:"automated driving" OR all:"autonomous driving" OR all:"autonomous vehicle")'
-      - '(all:certification OR all:homologation OR all:"type approval") AND (all:"autonomous vehicle" OR all:"automated driving" OR all:"autonomous ship" OR all:"autonomous vessel" OR all:"autonomous train")'
-      - 'all:"runtime monitoring" AND (all:"autonomous vehicle" OR all:"automated driving")'
+      - 'abs:SOTIF OR abs:"ISO 21448" OR abs:"safety of the intended functionality"'
+      - 'abs:"UL 4600" OR abs:"ISO 34502" OR abs:"ISO/PAS 8800"'
+      - 'abs:"ISO 26262" AND (abs:autonomous OR abs:automated OR abs:"driver assistance")'
+      - '(abs:"safety case" OR abs:"assurance case") AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
+      - '(abs:"safety assurance" OR abs:"safety validation") AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
+      - '(abs:"scenario-based" OR abs:"scenario based") AND (abs:testing OR abs:verification OR abs:validation) AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving")'
+      - '(abs:homologation OR abs:"type approval" OR abs:"safety certification" OR abs:"regulatory approval" OR abs:"certification process") AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
+      - '(abs:"runtime monitoring" OR abs:"runtime verification" OR abs:"safety monitor") AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving" OR abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous train")'
 
   - name: "Автономный морской транспорт"
     description: "MASS, автономные суда, безэкипажные надводные аппараты, COLREG"
     categories: []
     is_active: true
     queries:
-      - 'all:"autonomous ship"'
-      - 'all:"autonomous ships"'
-      - 'all:"autonomous vessel"'
-      - 'all:"autonomous vessels"'
-      - 'all:"maritime autonomous surface ship"'
-      - 'all:"autonomous surface vessel"'
-      - 'all:"unmanned surface vehicle"'
-      - 'all:"unmanned surface vessel"'
-      - 'all:COLREG OR all:COLREGs'
-      - 'all:maritime AND (all:autonomous OR all:autonomy) AND (all:navigation OR all:"collision avoidance" OR all:perception)'
+      - 'abs:"autonomous ship" OR abs:"autonomous vessel" OR abs:"autonomous shipping" OR abs:"unmanned ship"'
+      - 'abs:"maritime autonomous surface ship" OR abs:"autonomous surface vessel" OR abs:"autonomous surface vehicle"'
+      - 'abs:"unmanned surface vehicle" OR abs:"unmanned surface vessel"'
+      - 'abs:COLREG OR abs:COLREGs'
+      - '(abs:maritime OR abs:ships OR abs:"surface vessel") AND (abs:"autonomous navigation" OR abs:"collision avoidance")'
 
   - name: "Внутренний водный и речной транспорт"
     description: "Автономные речные суда, inland waterways, smart shipping"
     categories: []
     is_active: true
     queries:
-      - 'all:"inland waterway"'
-      - 'all:"inland waterways"'
-      - 'all:"inland vessel"'
-      - 'all:"inland navigation"'
-      - 'all:"inland shipping"'
-      - 'all:river AND (all:vessel OR all:ship OR all:boat) AND (all:autonomous OR all:unmanned OR all:"collision avoidance")'
-      - 'all:"smart shipping"'
+      - 'abs:"inland vessel" OR abs:"inland shipping" OR abs:"inland waterway transport"'
+      - '(abs:"inland waterway" OR abs:"inland navigation") AND (abs:vessel OR abs:ship OR abs:shipping OR abs:barge OR abs:autonomous OR abs:unmanned)'
+      - '(abs:river OR abs:canal OR abs:waterway) AND (abs:vessel OR abs:ship OR abs:boat OR abs:barge) AND (abs:autonomous OR abs:unmanned OR abs:"collision avoidance")'
+      - 'abs:"smart shipping" OR abs:"autonomous barge" OR abs:"autonomous ferry" OR abs:"autonomous boat"'
 
   - name: "Автономный железнодорожный транспорт"
     description: "ATO, GoA3/GoA4, беспилотные поезда, обнаружение препятствий на пути"
     categories: []
     is_active: true
     queries:
-      - 'all:"autonomous train"'
-      - 'all:"autonomous trains"'
-      - 'all:"driverless train"'
-      - 'all:"automatic train operation"'
-      - 'all:GoA4 OR all:"grade of automation"'
-      - '(all:railway OR all:railways OR all:rail) AND (all:autonomous OR all:automation OR all:"obstacle detection")'
-      - 'all:train AND all:"obstacle detection"'
+      - '(abs:"autonomous train" OR abs:"driverless train" OR abs:"automatic train operation" OR abs:"automatic train protection") AND (abs:railway OR abs:railroad OR abs:rail OR abs:metro)'
+      - '(abs:"grade of automation" OR abs:GoA4 OR abs:GoA3 OR abs:GoA2) AND (abs:railway OR abs:railroad OR abs:rail OR abs:metro)'
+      - '(abs:railway OR abs:railroad) AND (abs:"obstacle detection" OR abs:"autonomous driving" OR abs:driverless OR abs:"automatic train" OR abs:"object detection" OR abs:"environment perception")'
+      - '(abs:ETCS OR abs:ERTMS OR abs:CBTC) AND (abs:railway OR abs:railroad)'
 
   - name: "Датасеты для обучения нейросетей автономного транспорта"
     description: "Новые датасеты, бенчмарки, разметка и синтетические данные"
     categories: ["cs.CV", "cs.RO", "cs.LG", "cs.AI"]
     is_active: true
     queries:
-      - '(ti:dataset OR ti:benchmark) AND (all:"autonomous driving" OR all:"automated driving" OR all:"self-driving")'
-      - '(ti:dataset OR ti:benchmark) AND (all:maritime OR all:vessel OR all:ship OR all:"surface vehicle" OR all:river)'
-      - '(ti:dataset OR ti:benchmark) AND (all:railway OR all:rail OR all:train)'
-      - '(all:"synthetic data" OR all:simulation) AND all:dataset AND (all:"autonomous driving" OR all:"autonomous vehicle" OR all:"autonomous ship")'
-      - '(all:annotation OR all:labeling OR all:"auto-labeling") AND (all:"autonomous driving" OR all:"autonomous vehicle")'
+      - '(ti:dataset OR ti:benchmark) AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving")'
+      - '(ti:dataset OR ti:benchmark) AND (abs:maritime OR abs:"surface vessel" OR abs:"surface vehicle" OR abs:"inland waterway" OR abs:"ship detection")'
+      - '(ti:dataset OR ti:benchmark) AND (abs:railway OR abs:railroad OR abs:"automatic train operation")'
+      - '(ti:synthetic OR ti:simulated OR ti:simulation) AND (ti:dataset OR ti:benchmark OR ti:data) AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving")'
+      - '(ti:annotation OR ti:"auto-labeling" OR ti:"auto-annotation" OR ti:"data labeling") AND (abs:"automated driving" OR abs:"autonomous driving" OR abs:"autonomous vehicle" OR abs:"automated vehicle" OR abs:"self-driving")'
 
   - name: "Перенос концепций между видами транспорта"
     description: "Кросс-доменные подходы: авто ↔ море ↔ ЖД ↔ авиация/БАС"
     categories: []
     is_active: true
     queries:
-      - '(all:"operational design domain" OR all:"safety case" OR all:"levels of automation") AND (all:maritime OR all:railway OR all:aviation OR all:UAS OR all:drone)'
-      - 'all:"cross-domain" AND all:autonomous AND (all:maritime OR all:railway OR all:automotive OR all:aviation)'
-      - 'all:"levels of autonomy" AND (all:ship OR all:vessel OR all:train OR all:railway)'
+      - '(abs:"operational design domain" OR abs:"levels of automation" OR abs:"levels of autonomy" OR abs:"safety case") AND (abs:maritime OR abs:ship OR abs:railway OR abs:aviation OR abs:"unmanned aircraft") AND (abs:autonomous OR abs:automated OR abs:unmanned)'
+      - '(abs:automotive OR abs:"automated driving" OR abs:"autonomous driving") AND (abs:maritime OR abs:railway OR abs:aviation OR abs:shipping) AND (abs:autonomous OR abs:autonomy OR abs:automation) AND (abs:"cross-domain" OR abs:"across domains" OR abs:"different domains" OR abs:"other domains" OR abs:"transport modes" OR abs:"lessons learned")'
+      - '(abs:"levels of autonomy" OR abs:"degrees of autonomy" OR abs:"autonomy levels" OR abs:"levels of automation") AND (abs:ship OR abs:maritime OR abs:railway OR abs:"autonomous vessel")'
 
   # Широкая тема: 20–60 статей в сутки. Включайте, только если готовы к нагрузке
   # на локальную LLM (суммаризация по полному тексту) и к объёмному дайджесту.
@@ -110,7 +105,6 @@ topics:
     categories: ["cs.RO", "cs.CV", "cs.AI", "cs.LG", "eess.SY", "cs.SY"]
     is_active: false
     queries:
-      - 'ti:"autonomous driving"'
-      - 'ti:"automated driving"'
-      - 'ti:"self-driving"'
-      - 'ti:"autonomous vehicle" OR ti:"autonomous vehicles"'
+      - 'ti:"autonomous driving" OR ti:"automated driving"'
+      - 'ti:"self-driving" AND (abs:vehicle OR abs:car OR abs:road OR abs:traffic OR abs:"autonomous driving")'
+      - 'ti:"autonomous vehicle" OR ti:"automated vehicle"'

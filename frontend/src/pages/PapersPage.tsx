@@ -34,7 +34,7 @@ import {
   type PaperFilters,
 } from '../api/endpoints';
 import type { Paper, PaperStatus } from '../api/types';
-import { PaperStatusBadge } from '../components/Badges';
+import { PaperStatusBadge, RelevanceBadge } from '../components/Badges';
 import {
   Field,
   PageHeader,
@@ -186,9 +186,19 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
               <Stack gap="xs">
                 {paper.topics.map((topic) => (
                   <div key={topic.id}>
-                    <Text size="sm" fw={600}>
-                      {topic.name}
-                    </Text>
+                    <Group gap="xs">
+                      <Text size="sm" fw={600}>
+                        {topic.name}
+                      </Text>
+                      {topic.relevance ? (
+                        <RelevanceBadge relevance={topic.relevance} size="sm" />
+                      ) : null}
+                    </Group>
+                    {topic.relevance_reason ? (
+                      <Text size="xs" c="dimmed" mt={2}>
+                        Оценка модели: {topic.relevance_reason}
+                      </Text>
+                    ) : null}
                     {topic.matched_queries.length ? (
                       <Stack gap={4} mt={4}>
                         <Text size="xs" c="dimmed">
@@ -218,6 +228,14 @@ function PaperDrawer({ paperId, onClose }: { paperId: number | null; onClose: ()
           <Divider label="Резюме" labelPosition="left" />
           {paper.summary ? (
             <>
+              {paper.summary.abstract_ru ? (
+                <Text size="sm" lh={1.6}>
+                  <Text span fw={700} inherit>
+                    Аннотация:
+                  </Text>{' '}
+                  {paper.summary.abstract_ru}
+                </Text>
+              ) : null}
               <SummaryText text={paper.summary.text_ru} />
               <Text size="xs" c="dimmed">
                 Модель {paper.summary.model} · чанков: {paper.summary.chunks_count} · токены:{' '}

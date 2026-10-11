@@ -32,6 +32,8 @@ def _topics(paper: Paper) -> list[PaperTopicOut]:
             name=link.topic.name,
             matched_keywords=link.matched_keywords,
             matched_queries=link.matched_queries,
+            relevance=link.relevance,
+            relevance_reason=link.relevance_reason,
         )
         for link in sorted(paper.topic_links, key=lambda link: link.topic.name)
     ]

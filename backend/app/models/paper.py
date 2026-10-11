@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin
 from app.models.admin import Topic
-from app.models.enums import PaperStatus, enum_column
+from app.models.enums import PaperStatus, Relevance, enum_column
 
 
 class Paper(TimestampMixin, Base):
@@ -62,6 +62,9 @@ class PaperTopic(Base):
     matched_queries: Mapped[list[str]] = mapped_column(
         ARRAY(Text), default=list, server_default="{}"
     )
+    # оценка LLM по названию и аннотации; NULL — не проверялась
+    relevance: Mapped[Relevance | None] = enum_column(Relevance, nullable=True)
+    relevance_reason: Mapped[str | None] = mapped_column(Text)
 
     paper: Mapped[Paper] = relationship(back_populates="topic_links")
     topic: Mapped[Topic] = relationship()
@@ -73,6 +76,8 @@ class Summary(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"), unique=True)
     text_ru: Mapped[str] = mapped_column(Text)
+    # краткая аннотация одним абзацем; NULL — резюме создано до её появления
+    abstract_ru: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str] = mapped_column(String(255))
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

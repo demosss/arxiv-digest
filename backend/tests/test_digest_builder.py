@@ -12,11 +12,13 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.models import (
     Digest,
+    DigestContent,
     DigestPaper,
     DigestStatus,
     Paper,
     PaperStatus,
     PaperTopic,
+    Relevance,
     RunStatus,
     RunTrigger,
     Summary,
@@ -32,15 +34,21 @@ from app.services.digest_builder import (
     split_summary,
 )
 from app.tasks.pipeline import build_digest_task
-from tests.factories import PERIOD_END, PERIOD_START, RUSSIAN_SUMMARY
+from tests.factories import PERIOD_END, PERIOD_START, RUSSIAN_ABSTRACT, RUSSIAN_SUMMARY
 from tests.test_summarization import make_paper
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 
-def _summarized(db: Session, arxiv_id: str, title: str, topics: list[Topic]) -> Paper:
+def _summarized(
+    db: Session, arxiv_id: str, title: str, topics: list[Topic], abstract: str | None = None
+) -> Paper:
     paper = make_paper(db, arxiv_id, PaperStatus.SUMMARIZED, title=title)
-    db.add(Summary(paper_id=paper.id, text_ru=RUSSIAN_SUMMARY, model="fake-model"))
+    db.add(
+        Summary(
+            paper_id=paper.id, text_ru=RUSSIAN_SUMMARY, abstract_ru=abstract, model="fake-model"
+        )
+    )
     for topic in topics:
         db.add(PaperTopic(paper_id=paper.id, topic_id=topic.id, matched_keywords=[]))
     db.commit()
@@ -210,6 +218,86 @@ def test_paper_in_several_topics_is_printed_once_with_reference(
     ]
 
 
+def test_topic_the_paper_is_irrelevant_to_does_not_list_it(
+    db: Session, tmp_path: Path, topics: tuple[Topic, Topic]
+) -> None:
+    agents, llm = topics
+    paper = _summarized(db, "2410.00001", "Language Models Only", [llm, agents])
+    link = db.get_one(PaperTopic, (paper.id, agents.id))
+    link.relevance = Relevance.IRRELEVANT
+    db.commit()
+
+    built = build_digest(
+        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+    )
+
+    assert [section.name for section in built.sections] == ["Языковые модели"]
+    assert [(i.arxiv_id, i.is_reference) for i in built.sections[0].items] == [
+        ("2410.00001", False)
+    ]
+
+
+def _flat(text: str) -> str:
+    # перенос слова в PDF — дефис U+2010 в конце строки
+    return text.replace("‐\n", "").replace("-\n", "").replace("\n", " ")
+
+
+@pytest.mark.parametrize(
+    ("content", "has_abstract", "has_label", "has_sections"),
+    [
+        (DigestContent.ABSTRACT, True, False, False),
+        (DigestContent.FULL, True, True, True),
+        (DigestContent.SUMMARY, False, False, True),
+    ],
+)
+def test_card_content_follows_digest_content(
+    db: Session,
+    tmp_path: Path,
+    topics: tuple[Topic, Topic],
+    content: DigestContent,
+    has_abstract: bool,
+    has_label: bool,
+    has_sections: bool,
+) -> None:
+    _summarized(db, "2410.00001", "Agents That Plan", [topics[0]], abstract=RUSSIAN_ABSTRACT)
+
+    built = build_digest(
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
+        content=content,
+    )
+
+    assert built.digest.content == content
+    assert built.stats()["content"] == content.value
+    text = _flat(_pdf_text(built.pdf_path))
+    assert ("не требует дообучения" in text) is has_abstract
+    assert ("Аннотация:" in text) is has_label
+    assert ("Значимость:" in text) is has_sections
+    if has_label:
+        assert text.index("Аннотация:") < text.index("Задача:")
+
+
+def test_abstract_only_digest_falls_back_to_sections_for_old_summaries(
+    db: Session, tmp_path: Path, topics: tuple[Topic, Topic]
+) -> None:
+    _summarized(db, "2410.00001", "Summarized Before Abstracts", [topics[0]])
+
+    built = build_digest(
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
+        content=DigestContent.ABSTRACT,
+    )
+
+    text = _pdf_text(built.pdf_path)
+    assert "Задача:" in text and "Аннотация:" not in text
+
+
 def test_only_summarized_papers_of_the_period_are_included(
     db: Session, tmp_path: Path, topics: tuple[Topic, Topic]
 ) -> None:
@@ -296,8 +384,19 @@ def test_build_digest_task_passes_digest_id_to_next_step(
     assert run.status == RunStatus.SUCCESS
     assert run.stats["papers_count"] == 1
     assert run.stats["status"] == "ready"
+    # состав карточек без параметра запуска берётся из DIGEST_CONTENT
+    assert run.stats["content"] == "full"
+    assert digest.content == DigestContent.FULL
     assert run.stats["pdf_size_bytes"] > 1000
     assert (tmp_path / "digests" / "digest_2024-10-05.pdf").is_file()
+
+    again = runs.create_run(db, task_type=TaskType.BUILD_DIGEST, trigger=RunTrigger.MANUAL)
+    db.commit()
+    build_digest_task.apply(
+        args=[{**period, "digest_content": "abstract"}], kwargs={"run_id": again.id}
+    )
+    db.refresh(digest)
+    assert digest.content == DigestContent.ABSTRACT
 
 
 async def test_digests_api(
@@ -313,6 +412,7 @@ async def test_digests_api(
     assert listing["total"] == 1
     item = listing["items"][0]
     assert item["status"] == "ready"
+    assert item["content"] == "full"
     assert item["papers_count"] == 1
     assert item["has_pdf"] is True
     assert item["filename"] == "digest_2024-10-05.pdf"

@@ -101,6 +101,9 @@
       <span>{{ item.date }}</span>
       <span>arXiv:{{ item.arxiv_id }}</span>
     </p>
+    {% if item.abstract %}
+    <p class="summary">{% if item.summary %}<b>Аннотация:</b> {% endif %}{{ item.abstract }}</p>
+    {% endif %}
     {% for label, text in item.summary %}
     <p class="summary">{% if label %}<b>{{ label }}:</b> {% endif %}{{ text }}</p>
     {% endfor %}

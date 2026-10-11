@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.models.enums import DigestContent
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -16,6 +17,7 @@ class PublicSettings(BaseModel):
     llm_context_chars: int
     arxiv_max_results_per_topic: int
     send_empty_digest: bool
+    digest_content: DigestContent = Field(description="Состав карточки дайджеста по умолчанию")
     pipeline_stale_hours: int
 
 
@@ -30,5 +32,6 @@ async def get_public_settings() -> PublicSettings:
         llm_context_chars=settings.llm_context_chars,
         arxiv_max_results_per_topic=settings.arxiv_max_results_per_topic,
         send_empty_digest=settings.send_empty_digest,
+        digest_content=DigestContent(settings.digest_content),
         pipeline_stale_hours=settings.pipeline_stale_hours,
     )

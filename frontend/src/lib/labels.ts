@@ -1,8 +1,10 @@
 import type {
   DeliveryStatus,
+  DigestContent,
   DigestStatus,
   LogLevel,
   PaperStatus,
+  Relevance,
   RunStatus,
   RunTrigger,
   SmtpSecurity,
@@ -47,6 +49,13 @@ export const PAPER_STATUS: Record<PaperStatus, StatusView> = {
   text_extracted: { label: 'Текст извлечён', color: 'blue' },
   summarized: { label: 'Есть резюме', color: 'green' },
   failed: { label: 'Ошибка', color: 'red' },
+  irrelevant: { label: 'Нерелевантна', color: 'orange' },
+};
+
+export const RELEVANCE: Record<Relevance, StatusView> = {
+  relevant: { label: 'По теме', color: 'green' },
+  partial: { label: 'Частично по теме', color: 'yellow' },
+  irrelevant: { label: 'Не по теме', color: 'orange' },
 };
 
 export const DIGEST_STATUS: Record<DigestStatus, StatusView> = {
@@ -57,6 +66,16 @@ export const DIGEST_STATUS: Record<DigestStatus, StatusView> = {
   failed: { label: 'Ошибка', color: 'red' },
   empty: { label: 'Пустой', color: 'gray' },
 };
+
+export const DIGEST_CONTENT_LABELS: Record<DigestContent, string> = {
+  abstract: 'Только аннотация',
+  full: 'Аннотация и разделы резюме',
+  summary: 'Только разделы резюме',
+};
+
+export const DIGEST_CONTENT_OPTIONS = (Object.keys(DIGEST_CONTENT_LABELS) as DigestContent[]).map(
+  (value) => ({ value, label: DIGEST_CONTENT_LABELS[value] }),
+);
 
 export const DELIVERY_STATUS: Record<DeliveryStatus, StatusView> = {
   pending: { label: 'Ожидает', color: 'gray' },
@@ -118,6 +137,8 @@ const STAT_LABELS: Record<string, string> = {
   papers_total: 'Статей к обработке',
   summarized: 'Суммаризировано',
   failed: 'С ошибкой',
+  irrelevant: 'Нерелевантных',
+  relevance_checks: 'Проверок релевантности',
   llm_calls: 'Вызовов LLM',
   chunks: 'Чанков',
   prompt_tokens: 'Токенов запроса',
@@ -133,6 +154,10 @@ const STAT_LABELS: Record<string, string> = {
   skipped_already_sent: 'Уже получили ранее',
   digest_status: 'Статус дайджеста',
   status: 'Статус',
+  content: 'Состав карточек',
+  digest_content: 'Состав карточек',
+  fill_abstracts: 'Только дописать аннотации',
+  retry_failed: 'Повторить упавшие',
   period_start: 'Начало периода',
   period_end: 'Конец периода',
   pdf_path: 'Файл',

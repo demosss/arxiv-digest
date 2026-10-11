@@ -36,6 +36,7 @@ export interface PublicSettings {
   llm_context_chars: number;
   arxiv_max_results_per_topic: number;
   send_empty_digest: boolean;
+  digest_content: DigestContent;
   pipeline_stale_hours: number;
 }
 
@@ -225,6 +226,8 @@ export interface RunCreate {
   paper_ids?: number[];
   force?: boolean;
   retry_failed?: boolean;
+  fill_abstracts?: boolean;
+  digest_content?: DigestContent;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical';
@@ -247,13 +250,19 @@ export interface LogPage {
 
 // --- Статьи ---
 
-export type PaperStatus = 'new' | 'downloaded' | 'text_extracted' | 'summarized' | 'failed';
+export type PaperStatus =
+  'new' | 'downloaded' | 'text_extracted' | 'summarized' | 'failed' | 'irrelevant';
+
+// оценка LLM: относится ли статья к теме, которая её нашла
+export type Relevance = 'relevant' | 'partial' | 'irrelevant';
 
 export interface PaperTopic {
   id: number;
   name: string;
   matched_keywords: string[];
   matched_queries: string[];
+  relevance: Relevance | null;
+  relevance_reason: string | null;
 }
 
 export interface Paper {
@@ -276,6 +285,8 @@ export interface Paper {
 
 export interface Summary {
   text_ru: string;
+  // краткая аннотация; null — резюме создано до её появления
+  abstract_ru: string | null;
   model: string;
   prompt_tokens: number;
   completion_tokens: number;
@@ -296,6 +307,8 @@ export interface PaperDetail extends Paper {
 
 export type DigestStatus = 'building' | 'ready' | 'sent' | 'partially_sent' | 'failed' | 'empty';
 export type DeliveryStatus = 'pending' | 'sent' | 'failed';
+// что печатается в карточке статьи: аннотация, аннотация и разделы резюме, только разделы
+export type DigestContent = 'abstract' | 'full' | 'summary';
 
 export interface Digest {
   id: number;
@@ -303,6 +316,7 @@ export interface Digest {
   period_end: string;
   papers_count: number;
   status: DigestStatus;
+  content: DigestContent;
   error: string | null;
   has_pdf: boolean;
   filename: string | null;

@@ -43,6 +43,7 @@ def _to_out(digest: Digest) -> DigestOut:
         period_end=digest.period_end,
         papers_count=digest.papers_count,
         status=digest.status,
+        content=digest.content,
         error=digest.error,
         has_pdf=pdf is not None,
         filename=pdf.name if pdf else None,

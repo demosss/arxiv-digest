@@ -38,7 +38,7 @@ import {
 } from '../components/common';
 import { formatPeriod } from '../lib/dates';
 import { useFormat } from '../lib/format';
-import { DIGEST_STATUS } from '../lib/labels';
+import { DIGEST_CONTENT_LABELS, DIGEST_STATUS } from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
 const STATUS_OPTIONS = (Object.keys(DIGEST_STATUS) as DigestStatus[]).map((value) => ({
@@ -124,7 +124,8 @@ function DigestDrawer({ digestId, onClose }: { digestId: number | null; onClose:
           <Group gap="sm">
             <DigestStatusBadge status={digest.status} size="lg" />
             <Text size="sm" c="dimmed">
-              Статей: {digest.papers_count} · обновлён {fmt.dateTime(digest.updated_at)}
+              Статей: {digest.papers_count} · {DIGEST_CONTENT_LABELS[digest.content].toLowerCase()}{' '}
+              · обновлён {fmt.dateTime(digest.updated_at)}
             </Text>
           </Group>
           <Group gap="sm">
@@ -308,6 +309,7 @@ export function DigestsPage() {
             <Table.Tr>
               <Table.Th>Период (UTC)</Table.Th>
               <Table.Th>Статей</Table.Th>
+              <Table.Th>Состав карточек</Table.Th>
               <Table.Th>Статус</Table.Th>
               <Table.Th>Обновлён</Table.Th>
               <Table.Th w={160} />
@@ -327,6 +329,7 @@ export function DigestsPage() {
                   </Anchor>
                 </Table.Td>
                 <Table.Td>{digest.papers_count}</Table.Td>
+                <Table.Td>{DIGEST_CONTENT_LABELS[digest.content]}</Table.Td>
                 <Table.Td>
                   <DigestStatusBadge status={digest.status} />
                 </Table.Td>

@@ -9,7 +9,7 @@ from celery import Task
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import RunStatus, TaskRun
+from app.models import DigestContent, RunStatus, TaskRun
 from app.services.arxiv_client import ArxivClient
 from app.services.collector import Collector
 from app.services.digest_builder import build_digest
@@ -17,7 +17,8 @@ from app.services.llm_client import LLMClient
 from app.services.llm_summarizer import Summarizer
 from app.services.mailer import run_send_digest
 from app.services.periods import period_from_context, period_to_context
-from app.services.summarization import summarize_papers
+from app.services.relevance import RelevanceJudge
+from app.services.summarization import fill_abstracts, summarize_papers
 from app.tasks.base import Context, StepResult, execute_step
 from app.tasks.celery_app import QUEUE_DEFAULT, QUEUE_LLM, QUEUE_MAIL, celery_app
 
@@ -46,12 +47,16 @@ def _collect(session: Session, run: TaskRun, context: Context) -> StepResult:
 def _summarize(session: Session, run: TaskRun, context: Context) -> StepResult:
     settings = get_settings()
     llm = LLMClient.from_settings(settings)
+    summarizer = Summarizer(llm, context_chars=settings.llm_context_chars)
+    if context.get("fill_abstracts"):
+        return StepResult(stats=fill_abstracts(session, summarizer, llm).as_dict())
     stats = summarize_papers(
         session,
-        Summarizer(llm, context_chars=settings.llm_context_chars),
+        summarizer,
         llm,
         paper_ids=context.get("paper_ids"),
         retry_failed=bool(context.get("retry_failed")),
+        judge=RelevanceJudge(llm) if settings.llm_relevance_check else None,
     )
     return StepResult(stats=stats.as_dict())
 
@@ -65,6 +70,7 @@ def _build_digest(session: Session, run: TaskRun, context: Context) -> StepResul
         period_end,
         digests_dir=settings.digests_dir,
         timezone=settings.tz,
+        content=DigestContent(context.get("digest_content") or settings.digest_content),
     )
     return StepResult(
         stats=built.stats(),

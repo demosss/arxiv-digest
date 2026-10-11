@@ -108,6 +108,9 @@ def _needs_processing(paper: Paper) -> bool:
     """Новые статьи и те, чья обработка в прошлый раз оборвалась до извлечения текста."""
     if paper.status in (PaperStatus.NEW, PaperStatus.DOWNLOADED):
         return True
+    if paper.status == PaperStatus.IRRELEVANT:
+        # отброшенную статью нашла ещё одна тема: текст нужен снова, чтобы оценить её для этой темы
+        return any(link.relevance is None for link in paper.topic_links)
     return paper.status == PaperStatus.FAILED and paper.text_chars is None
 
 

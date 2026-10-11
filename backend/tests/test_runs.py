@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.models import Paper, RunStatus, RunTrigger, TaskLog, TaskRun, TaskType, Topic
+from app.schemas.runs import RunCreate
 from app.services import runs
 from app.services.arxiv_client import ArxivUnavailableError
 from app.services.periods import previous_utc_day
@@ -328,6 +329,21 @@ async def test_manual_run_validation(
 
     assert response.status_code == 422
     assert published == []
+
+
+def test_step_specific_params_reach_only_their_tasks() -> None:
+    def params(task_type: str, **extra: Any) -> dict[str, Any]:
+        return RunCreate.model_validate({"task_type": task_type, **extra}).to_params()
+
+    assert params("build_digest", digest_content="abstract")["digest_content"] == "abstract"
+    assert params("full_pipeline", digest_content="full")["digest_content"] == "full"
+    assert "digest_content" not in params("build_digest")
+    assert "digest_content" not in params("collect", digest_content="abstract")
+    assert params("summarize", fill_abstracts=True) == {"fill_abstracts": True}
+    # в цепочке флаг подменил бы суммаризацию новых статей
+    assert "fill_abstracts" not in params("full_pipeline", fill_abstracts=True)
+    with pytest.raises(ValueError, match="digest_content"):
+        params("build_digest", digest_content="everything")
 
 
 async def test_broker_failure_marks_run_failed(

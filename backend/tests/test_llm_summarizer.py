@@ -15,7 +15,7 @@ from app.services.llm_summarizer import (
     split_into_chunks,
     validate_response,
 )
-from tests.factories import RUSSIAN_NOTE, RUSSIAN_SUMMARY, FakeLLM
+from tests.factories import RUSSIAN_ABSTRACT, RUSSIAN_NOTE, RUSSIAN_SUMMARY, FakeLLM
 
 REQUEST = httpx.Request("POST", "http://llm.test/v1/chat/completions")
 
@@ -133,7 +133,7 @@ def test_valid_responses_pass() -> None:
 # --- map-reduce ---
 
 
-def test_single_chunk_uses_one_call() -> None:
+def test_single_chunk_uses_two_calls() -> None:
     llm = FakeLLM()
 
     result = Summarizer(llm, context_chars=24000).summarize(
@@ -141,12 +141,13 @@ def test_single_chunk_uses_one_call() -> None:
     )
 
     assert result.text == RUSSIAN_SUMMARY
+    assert result.abstract == RUSSIAN_ABSTRACT
     assert result.chunks_count == 1
-    assert result.llm_calls == 1
+    assert result.llm_calls == 2
     assert result.model == "fake-model"
-    assert (result.prompt_tokens, result.completion_tokens, result.duration_ms) == (100, 40, 250)
-    call = llm.calls[0]
-    assert call["purpose"] == "summary"
+    assert (result.prompt_tokens, result.completion_tokens, result.duration_ms) == (200, 80, 500)
+    assert [call["purpose"] for call in llm.calls] == ["abstract", "summary"]
+    call = llm.calls[1]
     assert call["system"] == prompts.SYSTEM_PROMPT
     assert "Название: A Paper Title" in call["user"]
     assert "Аннотация: The abstract." in call["user"]
@@ -160,6 +161,7 @@ def test_long_text_is_map_reduced() -> None:
     paragraphs = _paragraphs(12)
     llm = FakeLLM(
         [
+            RUSSIAN_ABSTRACT,
             "Конспект первого фрагмента.",
             "Конспект второго фрагмента.",
             "Конспект третьего фрагмента.",
@@ -171,18 +173,24 @@ def test_long_text_is_map_reduced() -> None:
     )
 
     assert result.chunks_count == 3
-    assert result.llm_calls == 4
-    assert [call["purpose"] for call in llm.calls] == ["map 1/3", "map 2/3", "map 3/3", "reduce"]
-    assert (result.prompt_tokens, result.completion_tokens, result.duration_ms) == (400, 160, 1000)
+    assert result.llm_calls == 5
+    assert [call["purpose"] for call in llm.calls] == [
+        "abstract",
+        "map 1/3",
+        "map 2/3",
+        "map 3/3",
+        "reduce",
+    ]
+    assert (result.prompt_tokens, result.completion_tokens, result.duration_ms) == (500, 200, 1250)
 
-    first_map = llm.calls[0]["user"]
+    first_map = llm.calls[1]["user"]
     assert "фрагмент 1 из 3" in first_map
     assert "«A Paper Title»" in first_map
     assert "Paragraph 000." in first_map
     assert "Paragraph 011." not in first_map
-    assert "Paragraph 011." in llm.calls[2]["user"]
+    assert "Paragraph 011." in llm.calls[3]["user"]
 
-    reduce = llm.calls[3]["user"]
+    reduce = llm.calls[4]["user"]
     assert "Название: A Paper Title" in reduce
     assert "Аннотация: The abstract." in reduce
     assert "[Фрагмент 1]\nКонспект первого фрагмента." in reduce
@@ -193,15 +201,15 @@ def test_long_text_is_map_reduced() -> None:
 
 
 def test_invalid_answer_is_retried_once() -> None:
-    llm = FakeLLM(["As an AI, I cannot do that.", RUSSIAN_SUMMARY])
+    llm = FakeLLM([RUSSIAN_ABSTRACT, "As an AI, I cannot do that.", RUSSIAN_SUMMARY])
 
     result = Summarizer(llm, context_chars=24000).summarize("T", "A", "Body text.")
 
     assert result.text == RUSSIAN_SUMMARY
-    assert result.llm_calls == 2
-    assert result.prompt_tokens == 200
-    assert "Предыдущий ответ отклонён" not in llm.calls[0]["user"]
-    assert "Предыдущий ответ отклонён: ответ содержит служебную фразу" in llm.calls[1]["user"]
+    assert result.llm_calls == 3
+    assert result.prompt_tokens == 300
+    assert "Предыдущий ответ отклонён" not in llm.calls[1]["user"]
+    assert "Предыдущий ответ отклонён: ответ содержит служебную фразу" in llm.calls[2]["user"]
 
 
 def test_two_invalid_answers_fail() -> None:
@@ -216,13 +224,15 @@ def test_two_invalid_answers_fail() -> None:
 def test_notes_are_collapsed_when_they_do_not_fit() -> None:
     paragraphs = _paragraphs(12)
     long_note = "Очень подробный конспект фрагмента. " * 60
-    llm = FakeLLM([long_note, long_note, long_note, "Сжатый конспект первых фрагментов."])
+    llm = FakeLLM(
+        [RUSSIAN_ABSTRACT, long_note, long_note, long_note, "Сжатый конспект первых фрагментов."]
+    )
 
     result = Summarizer(llm, context_chars=5000).summarize("T", "A", "\n\n".join(paragraphs))
 
     purposes = [call["purpose"] for call in llm.calls]
-    assert purposes[:3] == ["map 1/3", "map 2/3", "map 3/3"]
-    assert purposes[3].startswith("collapse")
+    assert purposes[:4] == ["abstract", "map 1/3", "map 2/3", "map 3/3"]
+    assert purposes[4].startswith("collapse")
     assert purposes[-1] == "reduce"
     assert "Сжатый конспект первых фрагментов." in llm.calls[-1]["user"]
     assert result.text == RUSSIAN_SUMMARY
@@ -231,6 +241,49 @@ def test_notes_are_collapsed_when_they_do_not_fit() -> None:
 def test_empty_text_is_an_error() -> None:
     with pytest.raises(LLMError, match="нет текста"):
         Summarizer(FakeLLM(), context_chars=24000).summarize("T", "A", "   ")
+
+
+# --- краткая аннотация ---
+
+
+def test_abstract_is_written_from_arxiv_abstract() -> None:
+    llm = FakeLLM(["Аннотация: " + RUSSIAN_ABSTRACT.replace(". ", ".\n\n", 1)])
+
+    result = Summarizer(llm, context_chars=24000).summarize_abstract(
+        "A Paper Title", "The abstract.", "Body text."
+    )
+
+    # ответ приводится к одному абзацу без подписи
+    assert result.text == RUSSIAN_ABSTRACT
+    assert (result.llm_calls, result.prompt_tokens) == (1, 100)
+    call = llm.calls[0]
+    assert call["purpose"] == "abstract"
+    assert "Название: A Paper Title" in call["user"]
+    assert "The abstract." in call["user"]
+    assert "4–6 предложений" in call["user"]
+    assert "Body text." not in call["user"]
+
+
+def test_abstract_falls_back_to_the_beginning_of_the_paper() -> None:
+    llm = FakeLLM()
+    body = "Abstract. We study planning. " + "tail " * 5000
+
+    result = Summarizer(llm, context_chars=24000).summarize_abstract("T", "  ", body)
+
+    assert result.text == RUSSIAN_ABSTRACT
+    prompt = llm.calls[0]["user"]
+    assert "Начало текста статьи" in prompt
+    assert "We study planning." in prompt
+    assert len(prompt) < 8000
+
+
+def test_invalid_abstract_fails_before_the_full_text_is_summarized() -> None:
+    llm = FakeLLM(["Коротко.", "The paper is about language models. " * 10])
+
+    with pytest.raises(SummaryValidationError, match="на русском"):
+        Summarizer(llm, context_chars=24000).summarize("T", "A", "Body text.")
+
+    assert [call["purpose"] for call in llm.calls] == ["abstract", "abstract"]
 
 
 # --- клиент OpenAI-совместимого API ---

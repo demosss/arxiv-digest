@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=300, gt=0)
     llm_concurrency: int = Field(default=1, ge=1)
     llm_extra_body: dict[str, Any] = Field(default_factory=dict)
+    llm_relevance_check: bool = True
 
     # --- SMTP: из окружения берётся только пароль ---
     smtp_password: SecretStr | None = None
@@ -62,6 +63,8 @@ class Settings(BaseSettings):
 
     # --- Пайплайн ---
     send_empty_digest: bool = False
+    # состав карточки статьи в дайджесте (значения DigestContent); запуск может его переопределить
+    digest_content: Literal["abstract", "full", "summary"] = "full"
     pipeline_stale_hours: int = Field(default=6, gt=0)
 
     # --- Хранилище ---

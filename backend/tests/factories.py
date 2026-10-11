@@ -92,6 +92,12 @@ RUSSIAN_SUMMARY = (
     "по сравнению с базовой моделью.\n\n"
     "Значимость: работа показывает, что качество рассуждений можно повысить без дообучения."
 )
+RUSSIAN_ABSTRACT = (
+    "Авторы исследуют, как большие языковые модели справляются с многошаговыми рассуждениями. "
+    "Предложен подход, в котором модель сначала строит план, а затем выполняет его по шагам. "
+    "На двенадцати наборах данных точность выросла на 7,5 процентных пункта. "
+    "Метод не требует дообучения и применим к уже развёрнутым моделям."
+)
 RUSSIAN_NOTE = "Конспект фрагмента: описан метод планирования и результаты на 12 бенчмарках."
 
 
@@ -108,6 +114,8 @@ class FakeLLM:
         self.calls.append({"system": system, "user": user, "purpose": purpose})
         if self.replies:
             reply = self.replies.pop(0)
+        elif purpose == "abstract":
+            reply = RUSSIAN_ABSTRACT
         else:
             reply = RUSSIAN_SUMMARY if purpose in ("summary", "reduce") else RUSSIAN_NOTE
         if isinstance(reply, Exception):

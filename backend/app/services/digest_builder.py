@@ -14,7 +14,19 @@ from sqlalchemy.orm import Session, selectinload
 from weasyprint import HTML
 
 from app.core.logging import get_logger
-from app.models import Digest, DigestPaper, DigestStatus, Paper, PaperStatus, PaperTopic, Topic
+from app.models import (
+    Digest,
+    DigestContent,
+    DigestPaper,
+    DigestStatus,
+    Paper,
+    PaperStatus,
+    PaperTopic,
+    Relevance,
+    Summary,
+    Topic,
+)
+from app.services.latex_text import latex_to_text
 from app.services.prompts import SUMMARY_SECTIONS
 
 log = get_logger(__name__)
@@ -49,6 +61,8 @@ class DigestItem:
     authors: str = ""
     categories: list[str] = field(default_factory=list)
     date: str = ""
+    # краткая аннотация; пустая, если в карточке её нет
+    abstract: str = ""
     summary: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -77,6 +91,7 @@ class BuiltDigest:
         return {
             "digest_id": self.digest.id,
             "status": self.digest.status.value,
+            "content": self.digest.content.value,
             "papers_count": self.digest.papers_count,
             "topics": len(self.sections),
             "pdf_path": str(self.pdf_path),
@@ -130,6 +145,20 @@ def split_summary(text: str) -> list[tuple[str, str]]:
     return paragraphs
 
 
+def card_content(summary: Summary, content: DigestContent) -> tuple[str, list[tuple[str, str]]]:
+    """Аннотация и разделы резюме для карточки статьи в зависимости от состава дайджеста.
+
+    У резюме, созданного до появления аннотаций, её нет: в режиме «только аннотация»
+    такая статья печатается разделами, чтобы карточка не осталась пустой.
+    """
+    abstract = ""
+    if content != DigestContent.SUMMARY:
+        abstract = latex_to_text(summary.abstract_ru or "")
+    if content == DigestContent.ABSTRACT and abstract:
+        return abstract, []
+    return abstract, split_summary(latex_to_text(summary.text_ru))
+
+
 def select_papers(session: Session, start: datetime, end: datetime) -> list[Paper]:
     """Статьи периода с готовыми резюме, от новых к старым."""
     stmt = (
@@ -148,14 +177,21 @@ def select_papers(session: Session, start: datetime, end: datetime) -> list[Pape
     return [paper for paper in session.scalars(stmt).all() if paper.summary is not None]
 
 
-def build_sections(papers: list[Paper], tz: ZoneInfo) -> list[DigestSection]:
+def _shown_links(paper: Paper) -> list[PaperTopic]:
+    """Темы, в разделах которых печатается статья: без тех, для которых она нерелевантна."""
+    return [link for link in paper.topic_links if link.relevance != Relevance.IRRELEVANT]
+
+
+def build_sections(
+    papers: list[Paper], tz: ZoneInfo, content: DigestContent = DigestContent.FULL
+) -> list[DigestSection]:
     """Группирует статьи по темам. Статья выводится полностью в первой своей теме
 
     (темы упорядочены по названию), в остальных — ссылкой на неё.
     """
     topics: dict[int, Topic] = {}
     for paper in papers:
-        for link in paper.topic_links:
+        for link in _shown_links(paper):
             topics[link.topic_id] = link.topic
     ordered = sorted(topics.values(), key=lambda t: (t.name.lower(), t.id))
     sections = {
@@ -174,14 +210,16 @@ def build_sections(papers: list[Paper], tz: ZoneInfo) -> list[DigestSection]:
 
     for paper in papers:
         anchor = f"paper-{paper.id}"
-        topic_ids = sorted((link.topic_id for link in paper.topic_links), key=order.__getitem__)
+        title = latex_to_text(paper.title)
+        topic_ids = sorted((link.topic_id for link in _shown_links(paper)), key=order.__getitem__)
         primary = sections[topic_ids[0]] if topic_ids else no_topic
         assert paper.summary is not None
+        abstract, summary = card_content(paper.summary, content)
         primary.items.append(
             DigestItem(
                 paper_id=paper.id,
                 arxiv_id=paper.arxiv_id,
-                title=paper.title,
+                title=title,
                 anchor=anchor,
                 is_reference=False,
                 primary_section=primary.name,
@@ -189,7 +227,8 @@ def build_sections(papers: list[Paper], tz: ZoneInfo) -> list[DigestSection]:
                 authors=format_authors(paper.authors),
                 categories=paper.categories,
                 date=paper.published_at.astimezone(tz).strftime(DATE_FORMAT),
-                summary=split_summary(paper.summary.text_ru),
+                abstract=abstract,
+                summary=summary,
             )
         )
         for topic_id in topic_ids[1:]:
@@ -197,7 +236,7 @@ def build_sections(papers: list[Paper], tz: ZoneInfo) -> list[DigestSection]:
                 DigestItem(
                     paper_id=paper.id,
                     arxiv_id=paper.arxiv_id,
-                    title=paper.title,
+                    title=title,
                     anchor=anchor,
                     is_reference=True,
                     primary_section=primary.name,
@@ -247,8 +286,12 @@ def build_digest(
     *,
     digests_dir: Path,
     timezone: str,
+    content: DigestContent = DigestContent.FULL,
 ) -> BuiltDigest:
-    """Собирает дайджест за период. Повторный вызов обновляет ту же запись и перезаписывает PDF."""
+    """Собирает дайджест за период. Повторный вызов обновляет ту же запись и перезаписывает PDF.
+
+    `content` — что печатать в карточке статьи: аннотацию, разделы резюме или всё вместе.
+    """
     started = time.perf_counter()
     tz = ZoneInfo(timezone)
 
@@ -264,7 +307,7 @@ def build_digest(
 
     try:
         papers = select_papers(session, period_start, period_end)
-        sections = build_sections(papers, tz)
+        sections = build_sections(papers, tz, content)
         html = render_html(
             sections,
             period_start=period_start,
@@ -300,6 +343,7 @@ def build_digest(
             )
     digest.pdf_path = str(pdf_path)
     digest.papers_count = len(papers)
+    digest.content = content
     digest.status = DigestStatus.READY if papers else DigestStatus.EMPTY
     session.commit()
 
@@ -309,6 +353,7 @@ def build_digest(
         digest_id=digest.id,
         status=digest.status.value,
         papers_count=digest.papers_count,
+        content=content.value,
         topics=len(sections),
         pdf_path=str(pdf_path),
         pdf_size_bytes=pdf_size,
