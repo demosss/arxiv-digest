@@ -11,9 +11,12 @@ from sqlalchemy.orm import Session
 from app.core.db import Base, get_async_engine, get_sync_engine, get_sync_sessionmaker
 from app.core.security import create_access_token
 from app.models import AdminUser
+from app.services.profiles import ensure_default_profile
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "correct-horse-battery"
+# профиль по умолчанию: создаётся перед каждым тестом, без заголовка API работает с ним
+PROFILE_ID = 1
 # минимальная стоимость bcrypt, чтобы тесты не тратили время на хеширование
 _ADMIN_HASH = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt(rounds=4)).decode()
 
@@ -32,8 +35,10 @@ def _migrated_db() -> Iterator[None]:
 
 @pytest.fixture
 def db(_migrated_db: None) -> Iterator[Session]:
-    """Sync-сессия; после теста все таблицы очищаются."""
+    """Sync-сессия с профилем по умолчанию; после теста все таблицы очищаются."""
     with get_sync_sessionmaker()() as session:
+        assert ensure_default_profile(session).id == PROFILE_ID
+        session.commit()
         yield session
     tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
     with get_sync_engine().begin() as conn:

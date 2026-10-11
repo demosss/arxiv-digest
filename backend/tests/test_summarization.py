@@ -27,6 +27,7 @@ from app.services.llm_summarizer import Summarizer
 from app.services.relevance import RelevanceJudge
 from app.services.summarization import fill_abstracts, summarize_papers
 from app.tasks.pipeline import summarize_task
+from tests.conftest import PROFILE_ID
 from tests.factories import PARAGRAPH, RUSSIAN_ABSTRACT, RUSSIAN_SUMMARY, FakeLLM, make_entry
 
 UNAVAILABLE = LLMUnavailableError("LLM недоступна по адресу http://llm.test/v1: нет соединения")
@@ -41,6 +42,7 @@ def make_paper(
 ) -> Paper:
     entry = make_entry(arxiv_id, title=title)
     paper = Paper(
+        profile_id=PROFILE_ID,
         arxiv_id=entry.arxiv_id,
         version=1,
         title=entry.title,
@@ -60,7 +62,9 @@ def make_paper(
 
 
 def _summarize(db: Session, llm: FakeLLM, **kwargs: Any) -> Any:
-    return summarize_papers(db, Summarizer(llm, context_chars=24000), llm, **kwargs)
+    return summarize_papers(
+        db, Summarizer(llm, context_chars=24000), llm, profile_id=PROFILE_ID, **kwargs
+    )
 
 
 class DownLLM(FakeLLM):
@@ -83,6 +87,7 @@ def test_papers_get_russian_summaries(db: Session) -> None:
         "summarized": 2,
         "failed": 0,
         "irrelevant": 0,
+        "reused": 0,
         "relevance_checks": 0,
         "llm_calls": 4,
         "chunks": 2,
@@ -202,7 +207,7 @@ def test_fill_abstracts_touches_only_summaries_without_abstract(db: Session) -> 
     db.commit()
     llm = FakeLLM()
 
-    stats = fill_abstracts(db, Summarizer(llm, context_chars=24000), llm)
+    stats = fill_abstracts(db, Summarizer(llm, context_chars=24000), llm, profile_id=PROFILE_ID)
 
     assert (stats.papers_total, stats.summarized, stats.failed, stats.llm_calls) == (1, 1, 0, 1)
     assert [call["purpose"] for call in llm.calls] == ["abstract"]
@@ -234,7 +239,7 @@ def test_fill_abstracts_keeps_the_paper_when_the_answer_is_invalid(db: Session) 
     db.commit()
     llm = FakeLLM(["", ""])
 
-    stats = fill_abstracts(db, Summarizer(llm, context_chars=24000), llm)
+    stats = fill_abstracts(db, Summarizer(llm, context_chars=24000), llm, profile_id=PROFILE_ID)
 
     assert (stats.summarized, stats.failed) == (1, 1)
     db.refresh(bad)
@@ -249,7 +254,7 @@ def test_fill_abstracts_needs_the_llm(db: Session) -> None:
     llm = DownLLM()
 
     with pytest.raises(LLMUnavailableError, match="LLM недоступна"):
-        fill_abstracts(db, Summarizer(llm, context_chars=24000), llm)
+        fill_abstracts(db, Summarizer(llm, context_chars=24000), llm, profile_id=PROFILE_ID)
 
     db.refresh(paper)
     assert paper.status == PaperStatus.SUMMARIZED
@@ -265,7 +270,12 @@ NO = '{"relevance": "no", "reason": "Совпадение слов."}'
 def _link(db: Session, paper: Paper, *names: str) -> list[PaperTopic]:
     links = []
     for name in names:
-        topic = Topic(name=name, queries=[f'all:"{name}"'], description=f"Описание {name}")
+        topic = Topic(
+            profile_id=PROFILE_ID,
+            name=name,
+            queries=[f'all:"{name}"'],
+            description=f"Описание {name}",
+        )
         db.add(topic)
         db.flush()
         links.append(PaperTopic(paper_id=paper.id, topic_id=topic.id, matched_queries=[]))
@@ -386,7 +396,9 @@ def test_summarize_task_fails_run_when_llm_is_down(
     configure_logging("worker-llm")
     paper = make_paper(db, "2410.00001")
     monkeypatch.setattr(LLMClient, "from_settings", classmethod(lambda cls, settings: DownLLM()))
-    run = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     result = summarize_task.apply(args=[{}], kwargs={"run_id": run.id})
@@ -406,7 +418,9 @@ def test_summarize_task_success(db: Session, monkeypatch: pytest.MonkeyPatch) ->
     configure_logging("worker-llm")
     paper = make_paper(db, "2410.00001")
     monkeypatch.setattr(LLMClient, "from_settings", classmethod(lambda cls, settings: FakeLLM()))
-    run = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     result = summarize_task.apply(args=[{"paper_ids": [paper.id]}], kwargs={"run_id": run.id})
@@ -429,7 +443,9 @@ def test_summarize_task_can_only_fill_abstracts(
     db.add(Summary(paper_id=old.id, text_ru="Старое резюме", model="old-model"))
     waiting = make_paper(db, "2410.00002")
     monkeypatch.setattr(LLMClient, "from_settings", classmethod(lambda cls, settings: FakeLLM()))
-    run = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     result = summarize_task.apply(args=[{"fill_abstracts": True}], kwargs={"run_id": run.id})
@@ -445,7 +461,7 @@ def test_summarize_task_can_only_fill_abstracts(
 
 
 async def test_papers_list_and_detail(auth_client: AsyncClient, db: Session) -> None:
-    topic = Topic(name="LLM", queries=['all:"large language model"'])
+    topic = Topic(profile_id=PROFILE_ID, name="LLM", queries=['all:"large language model"'])
     db.add(topic)
     db.commit()
     summarized = make_paper(db, "2410.00001", PaperStatus.SUMMARIZED, title="Agents with tools")
@@ -590,7 +606,9 @@ async def test_papers_are_not_deleted_while_runs_are_active(
     auth_client: AsyncClient, db: Session
 ) -> None:
     paper = make_paper(db, "2410.00001")
-    run = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     single = await auth_client.delete(f"/api/papers/{paper.id}")

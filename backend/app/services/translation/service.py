@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 from app.models import Paper, TaskRun, Translation, TranslationStatus
 from app.services import runs
 from app.services.arxiv_client import ArxivError
+from app.services.files import profile_dir, remove_files
 from app.services.llm_client import LLMHealth, LLMUnavailableError
 from app.services.translation.docx_writer import DocxMeta, build_docx
 from app.services.translation.html_source import HtmlParseError, html_url, parse_html
@@ -191,7 +192,9 @@ def run_translation(
             llm, language=translation.language, chunk_chars=chunk_chars, max_tokens=max_tokens
         )
         translate_stats = translator.translate(document)
-        path = translations_dir / translation_filename(paper.arxiv_id, translation.language)
+        path = profile_dir(translations_dir, paper.profile_id) / translation_filename(
+            paper.arxiv_id, translation.language
+        )
         docx_stats = build_docx(
             document,
             language=translation.language,
@@ -211,12 +214,16 @@ def run_translation(
         session.commit()
         raise
 
+    previous_path = translation.docx_path
     translation.status = TranslationStatus.READY
     translation.source = document.source
     translation.docx_path = str(path)
     translation.model = llm.model
     translation.duration_ms = round((time.perf_counter() - started) * 1000)
     session.commit()
+    if previous_path and Path(previous_path) != path:
+        # перевод сделан до появления каталогов профилей: прежний файл больше не нужен
+        remove_files([previous_path])
     return {
         "translation_id": translation.id,
         "arxiv_id": paper.arxiv_id,

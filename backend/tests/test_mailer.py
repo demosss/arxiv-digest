@@ -1,7 +1,9 @@
 import smtplib
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, ClassVar
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
@@ -34,12 +36,14 @@ from app.services.mailer import (
     MailerError,
     SmtpConfig,
     build_digest_message,
+    digest_subject,
     load_smtp_config,
     open_connection,
     run_send_digest,
     send_test_email,
 )
 from app.tasks.pipeline import send_digest_task
+from tests.conftest import PROFILE_ID
 from tests.factories import PERIOD_END, PERIOD_START
 from tests.test_summarization import make_paper
 
@@ -90,8 +94,10 @@ class FakeSMTP:
 
 
 def _recipients(db: Session, *emails: str, inactive: tuple[str, ...] = ()) -> None:
-    db.add_all([Recipient(email=email) for email in emails])
-    db.add_all([Recipient(email=email, is_active=False) for email in inactive])
+    db.add_all([Recipient(profile_id=PROFILE_ID, email=email) for email in emails])
+    db.add_all(
+        [Recipient(profile_id=PROFILE_ID, email=email, is_active=False) for email in inactive]
+    )
     db.commit()
 
 
@@ -116,6 +122,7 @@ def _digest(
     pdf_path = tmp_path / "digest_2024-10-05.pdf"
     pdf_path.write_bytes(PDF)
     digest = Digest(
+        profile_id=PROFILE_ID,
         period_start=PERIOD_START,
         period_end=PERIOD_END,
         pdf_path=str(pdf_path),
@@ -137,7 +144,11 @@ def _send(
     db: Session, digest: Digest, smtp: FakeSMTP, sleeps: list[float] | None = None, **kwargs: Any
 ) -> Any:
     mailer = DigestMailer(
-        db, CONFIG, smtp_factory=smtp, sleep=(sleeps if sleeps is not None else []).append
+        db,
+        CONFIG,
+        timezone="Europe/Moscow",
+        smtp_factory=smtp,
+        sleep=(sleeps if sleeps is not None else []).append,
     )
     db.refresh(digest)
     return mailer.send(digest, **kwargs)
@@ -160,7 +171,9 @@ def test_message_has_subject_text_html_and_pdf_attachment(db: Session, tmp_path:
     _send(db, digest, smtp)
 
     message = smtp.sent[0]
-    assert message["Subject"] == "Дайджест arXiv за 05.10.2024"
+    # тема — профиль и дата рассылки, период дайджеста — в теле письма
+    sent_on = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y")
+    assert message["Subject"] == f"arXiv Digest - Основной - {sent_on}"
     assert message["To"] == "a@example.com"
     assert "digest@example.com" in message["From"]
     assert message["Message-ID"].endswith("@example.com>")
@@ -170,10 +183,12 @@ def test_message_has_subject_text_html_and_pdf_attachment(db: Session, tmp_path:
     html = message.get_body(preferencelist=("html",))
     assert text is not None and html is not None
     plain = text.get_content()
+    assert plain.startswith("Дайджест arXiv за 05.10.2024\n")
     assert "Статей в выпуске: 2" in plain
     assert "1. Paper number 1" in plain
     assert "https://arxiv.org/abs/2410.00002" in plain
     rendered = html.get_content()
+    assert "Дайджест arXiv за 05.10.2024" in rendered
     assert "Paper number 2" in rendered
     assert 'href="https://arxiv.org/abs/2410.00001"' in rendered
 
@@ -184,15 +199,31 @@ def test_message_has_subject_text_html_and_pdf_attachment(db: Session, tmp_path:
     assert attachments[0].get_content() == PDF
 
 
-def test_multi_day_subject_and_empty_digest_text(db: Session, tmp_path: Path) -> None:
+def test_subject_date_is_in_service_timezone() -> None:
+    # 22:30 UTC — в Москве уже следующий день
+    sent_at = datetime(2024, 10, 5, 22, 30, tzinfo=UTC)
+
+    assert digest_subject("Беспилотники", sent_at, ZoneInfo("Europe/Moscow")) == (
+        "arXiv Digest - Беспилотники - 06.10.2024"
+    )
+    assert digest_subject("Беспилотники", sent_at, ZoneInfo("UTC")) == (
+        "arXiv Digest - Беспилотники - 05.10.2024"
+    )
+
+
+def test_multi_day_title_and_empty_digest_text(db: Session, tmp_path: Path) -> None:
     digest = _digest(db, tmp_path, papers=0)
     digest.period_end = PERIOD_END.replace(day=7)
 
-    message = build_digest_message(CONFIG, "a@example.com", digest, [], PDF, "digest.pdf")
+    message = build_digest_message(
+        CONFIG, "a@example.com", digest, [], PDF, "digest.pdf", "arXiv Digest - Тема"
+    )
 
-    assert message["Subject"] == "Дайджест arXiv за 05.10.2024 — 07.10.2024"
+    assert message["Subject"] == "arXiv Digest - Тема"
     body = message.get_body(preferencelist=("plain",))
-    assert body is not None and "подходящих статей не нашлось" in body.get_content()
+    assert body is not None
+    assert body.get_content().startswith("Дайджест arXiv за 05.10.2024 — 07.10.2024\n")
+    assert "подходящих статей не нашлось" in body.get_content()
 
 
 # --- рассылка ---
@@ -347,7 +378,12 @@ def test_missing_pdf_is_an_error(db: Session, tmp_path: Path) -> None:
 
 def _run(db: Session, smtp: FakeSMTP, settings: Settings | None = None, **kwargs: Any) -> Any:
     return run_send_digest(
-        db, settings or get_settings(), smtp_factory=smtp, sleep=lambda _: None, **kwargs
+        db,
+        settings or get_settings(),
+        profile_id=PROFILE_ID,
+        smtp_factory=smtp,
+        sleep=lambda _: None,
+        **kwargs,
     )
 
 
@@ -562,7 +598,9 @@ def test_send_digest_task(db: Session, tmp_path: Path, recording_smtp: list[Reco
     _smtp_settings(db)
     _recipients(db, "a@example.com", "b@example.com")
     digest = _digest(db, tmp_path)
-    run = runs.create_run(db, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     result = send_digest_task.apply(args=[{"digest_id": digest.id}], kwargs={"run_id": run.id})
@@ -592,7 +630,9 @@ def test_send_digest_task_is_skipped_for_empty_digest(
     _smtp_settings(db)
     _recipients(db, "a@example.com")
     digest = _digest(db, tmp_path, status=DigestStatus.EMPTY, papers=0)
-    run = runs.create_run(db, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     send_digest_task.apply(args=[{"digest_id": digest.id}], kwargs={"run_id": run.id})
@@ -607,7 +647,9 @@ def test_send_digest_task_fails_without_smtp_settings(db: Session, tmp_path: Pat
     configure_logging("worker")
     _recipients(db, "a@example.com")
     digest = _digest(db, tmp_path)
-    run = runs.create_run(db, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     send_digest_task.apply(args=[{"digest_id": digest.id}], kwargs={"run_id": run.id})

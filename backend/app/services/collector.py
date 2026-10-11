@@ -1,5 +1,6 @@
 """Шаг collect: поиск препринтов по темам, сохранение, скачивание PDF и извлечение текста."""
 
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -8,7 +9,7 @@ from typing import Any, Protocol
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from app.core.logging import get_logger
 from app.models import Paper, PaperStatus, PaperTopic, Topic
@@ -19,6 +20,7 @@ from app.services.arxiv_client import (
     pdf_filename,
 )
 from app.services.arxiv_query import build_search_query, check_query, format_issues
+from app.services.files import profile_dir
 from app.services.pdf_text import ExtractedText, TextExtractionError, extract_text
 
 log = get_logger(__name__)
@@ -88,6 +90,8 @@ class CollectStats:
     query_errors: int = 0
     download_errors: int = 0
     text_extracted: int = 0
+    # из них взято у той же статьи другого профиля, без скачивания
+    text_reused: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +104,7 @@ class CollectStats:
             "query_errors": self.query_errors,
             "download_errors": self.download_errors,
             "text_extracted": self.text_extracted,
+            "text_reused": self.text_reused,
             "topics": {name: stats.as_dict() for name, stats in self.topics.items()},
         }
 
@@ -120,20 +125,25 @@ class Collector:
         session: Session,
         source: ArxivSource,
         *,
+        profile_id: int,
         papers_dir: Path,
         max_results_per_topic: int,
         text_extractor: Callable[[Path], ExtractedText] = extract_text,
     ) -> None:
         self._session = session
         self._source = source
-        self._papers_dir = papers_dir
+        self._profile_id = profile_id
+        self._papers_dir = profile_dir(papers_dir, profile_id)
         self._max_results = max_results_per_topic
         self._extract_text = text_extractor
+        self._reused = 0
 
     def run(self, period_start: datetime, period_end: datetime) -> CollectStats:
         stats = CollectStats(period_start=period_start, period_end=period_end)
         topics = self._session.scalars(
-            select(Topic).where(Topic.is_active.is_(True)).order_by(Topic.id)
+            select(Topic)
+            .where(Topic.profile_id == self._profile_id, Topic.is_active.is_(True))
+            .order_by(Topic.id)
         ).all()
         if not topics:
             log.warning("collect_no_active_topics")
@@ -160,6 +170,7 @@ class Collector:
                 stats.download_errors += 1
                 for name in topic_names:
                     stats.topics[name].download_errors += 1
+        stats.text_reused = self._reused
 
         log.info(
             "collect_done",
@@ -169,6 +180,7 @@ class Collector:
             query_errors=stats.query_errors,
             download_errors=stats.download_errors,
             text_extracted=stats.text_extracted,
+            text_reused=stats.text_reused,
         )
         return stats
 
@@ -287,10 +299,15 @@ class Collector:
         return list(matched)
 
     def _get_or_create_paper(self, entry: ArxivEntry) -> tuple[Paper, bool]:
-        paper = self._session.scalar(select(Paper).where(Paper.arxiv_id == entry.arxiv_id))
+        paper = self._session.scalar(
+            select(Paper).where(
+                Paper.profile_id == self._profile_id, Paper.arxiv_id == entry.arxiv_id
+            )
+        )
         if paper is not None:
             return paper, False
         paper = Paper(
+            profile_id=self._profile_id,
             arxiv_id=entry.arxiv_id,
             version=entry.version,
             title=entry.title,
@@ -311,8 +328,15 @@ class Collector:
         """Скачивает PDF и извлекает текст. Ошибка одной статьи не прерывает сбор."""
         with structlog.contextvars.bound_contextvars(paper_id=paper.id, arxiv_id=paper.arxiv_id):
             destination = self._papers_dir / pdf_filename(paper.arxiv_id)
+            saved = Path(paper.pdf_path) if paper.pdf_path else None
+            if paper.status == PaperStatus.DOWNLOADED and saved is not None and saved.is_file():
+                # файл скачан раньше — возможно, ещё до появления каталогов профилей
+                destination = saved
             try:
-                if not (paper.status == PaperStatus.DOWNLOADED and destination.is_file()):
+                downloaded = paper.status == PaperStatus.DOWNLOADED and destination.is_file()
+                if not downloaded and self._copy_from_profile(paper, destination):
+                    return True
+                if not downloaded:
                     self._source.download_pdf(paper.pdf_url, destination)
                     paper.pdf_path = str(destination)
                     paper.status = PaperStatus.DOWNLOADED
@@ -333,3 +357,42 @@ class Collector:
                 self._session.commit()
                 log.error("paper_processing_failed", error=str(exc))
                 return False
+
+    def _copy_from_profile(self, paper: Paper, destination: Path) -> bool:
+        """Берёт PDF и извлечённый текст у той же версии статьи в другом профиле.
+
+        Запись статьи у каждого профиля своя, но скачивать и разбирать один и тот же PDF
+        дважды незачем. Файл копируется: удаление статьи в одном профиле другой не задевает.
+        """
+        donors = self._session.scalars(
+            select(Paper)
+            .where(
+                Paper.arxiv_id == paper.arxiv_id,
+                Paper.version == paper.version,
+                Paper.profile_id != paper.profile_id,
+                Paper.full_text.is_not(None),
+                Paper.pdf_path.is_not(None),
+            )
+            .options(undefer(Paper.full_text))
+            .order_by(Paper.id)
+        ).all()
+        for donor in donors:
+            source = Path(donor.pdf_path or "")
+            if not source.is_file() or not donor.full_text:
+                continue
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+            except OSError as exc:
+                log.warning("paper_copy_failed", from_paper_id=donor.id, error=str(exc))
+                continue
+            paper.pdf_path = str(destination)
+            paper.full_text = donor.full_text
+            paper.text_chars = len(donor.full_text)
+            paper.status = PaperStatus.TEXT_EXTRACTED
+            paper.error = None
+            self._session.commit()
+            self._reused += 1
+            log.info("paper_text_reused", from_paper_id=donor.id, from_profile_id=donor.profile_id)
+            return True
+        return False

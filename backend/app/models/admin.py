@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, true
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, true
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
 from app.models.enums import SmtpSecurity, TaskType, enum_column
+from app.models.profile import profile_column
 
 SMTP_SETTINGS_ID = 1
 
@@ -21,9 +22,12 @@ class AdminUser(TimestampMixin, Base):
 
 class Topic(TimestampMixin, Base):
     __tablename__ = "topics"
+    # название темы уникально в пределах профиля
+    __table_args__ = (UniqueConstraint("profile_id", "name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
+    profile_id: Mapped[int] = profile_column()
+    name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     # поисковые выражения arXiv API; каждое выполняется отдельным запросом
     queries: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}")
@@ -35,9 +39,12 @@ class Topic(TimestampMixin, Base):
 
 class Recipient(TimestampMixin, Base):
     __tablename__ = "recipients"
+    # один адрес может получать дайджесты нескольких профилей
+    __table_args__ = (UniqueConstraint("profile_id", "email"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True)
+    profile_id: Mapped[int] = profile_column()
+    email: Mapped[str] = mapped_column(String(320))
     name: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
@@ -46,6 +53,7 @@ class Schedule(TimestampMixin, Base):
     __tablename__ = "schedules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = profile_column(index=True)
     name: Mapped[str] = mapped_column(String(255))
     task_type: Mapped[TaskType] = enum_column(TaskType)
     cron_expression: Mapped[str] = mapped_column(String(120))

@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
+from app.api.deps import CurrentUser, PaginationDep, ProfileDep, SessionDep, paginate
 from app.api.logs import LogLevel, LogLimit, fetch_logs
 from app.core.db import get_sync_sessionmaker
 from app.core.errors import ConflictError, NotFoundError
@@ -33,10 +33,15 @@ async def load_run(session: AsyncSession, run_id: int) -> TaskRun:
     return run
 
 
-async def ensure_no_active_runs(session: AsyncSession) -> None:
-    """Статьи и дайджесты нельзя удалять, пока с ними может работать задача."""
+async def ensure_no_active_runs(session: AsyncSession, profile_id: int) -> None:
+    """Статьи и дайджесты профиля нельзя удалять, пока с ними может работать задача."""
     active = await session.scalar(
-        select(TaskRun.id).where(TaskRun.status.in_(runs_service.ACTIVE_STATUSES)).limit(1)
+        select(TaskRun.id)
+        .where(
+            TaskRun.profile_id == profile_id,
+            TaskRun.status.in_(runs_service.ACTIVE_STATUSES),
+        )
+        .limit(1)
     )
     if active is not None:
         raise ConflictError(
@@ -45,6 +50,7 @@ async def ensure_no_active_runs(session: AsyncSession) -> None:
 
 
 def _conditions(
+    profile_id: int,
     task_type: TaskType | None,
     run_status: RunStatus | None,
     trigger: RunTrigger | None,
@@ -52,7 +58,7 @@ def _conditions(
     date_from: datetime | None,
     date_to: datetime | None,
 ) -> list[ColumnElement[bool]]:
-    conditions: list[ColumnElement[bool]] = []
+    conditions: list[ColumnElement[bool]] = [TaskRun.profile_id == profile_id]
     if task_type is not None:
         conditions.append(TaskRun.task_type == task_type)
     if run_status is not None:
@@ -68,10 +74,14 @@ def _conditions(
     return conditions
 
 
-def launch_manual_run(task_type: TaskType, params: dict[str, Any]) -> int:
+def launch_manual_run(profile_id: int, task_type: TaskType, params: dict[str, Any]) -> int:
     with get_sync_sessionmaker()() as session:
         run = launcher.launch_run(
-            session, task_type=task_type, trigger=RunTrigger.MANUAL, params=params
+            session,
+            profile_id=profile_id,
+            task_type=task_type,
+            trigger=RunTrigger.MANUAL,
+            params=params,
         )
         return run.id
 
@@ -91,6 +101,7 @@ def _cancel(run_id: int) -> list[int]:
 @router.get("", response_model=Page[RunOut])
 async def list_runs(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     task_type: TaskType | None = None,
     run_status: Annotated[RunStatus | None, Query(alias="status")] = None,
@@ -104,7 +115,11 @@ async def list_runs(
 ) -> Page[RunOut]:
     stmt = (
         select(TaskRun)
-        .where(*_conditions(task_type, run_status, trigger, schedule_id, date_from, date_to))
+        .where(
+            *_conditions(
+                profile.id, task_type, run_status, trigger, schedule_id, date_from, date_to
+            )
+        )
         .order_by(TaskRun.id.desc())
     )
     if not include_steps:
@@ -119,10 +134,12 @@ async def list_runs(
 
 
 @router.post("", response_model=RunDetail, status_code=status.HTTP_202_ACCEPTED)
-async def create_run(payload: RunCreate, session: SessionDep, user: CurrentUser) -> TaskRun:
-    """Ручной запуск шага или всего пайплайна. Задача выполняется в фоне."""
+async def create_run(
+    payload: RunCreate, session: SessionDep, profile: ProfileDep, user: CurrentUser
+) -> TaskRun:
+    """Ручной запуск шага или всего пайплайна в профиле. Задача выполняется в фоне."""
     params = payload.to_params()
-    run_id = await run_in_threadpool(launch_manual_run, payload.task_type, params)
+    run_id = await run_in_threadpool(launch_manual_run, profile.id, payload.task_type, params)
     audit("launch", "run", run_id, user.username, task_type=payload.task_type.value, params=params)
     return await load_run(session, run_id)
 
@@ -130,6 +147,7 @@ async def create_run(payload: RunCreate, session: SessionDep, user: CurrentUser)
 @router.delete("", response_model=DeletedCount)
 async def clear_runs(
     session: SessionDep,
+    profile: ProfileDep,
     user: CurrentUser,
     task_type: TaskType | None = None,
     run_status: Annotated[RunStatus | None, Query(alias="status")] = None,
@@ -155,7 +173,9 @@ async def clear_runs(
             TaskRun.parent_run_id.is_(None),
             TaskRun.status.not_in(runs_service.ACTIVE_STATUSES),
             ~has_active_step,
-            *_conditions(task_type, run_status, trigger, schedule_id, date_from, date_to),
+            *_conditions(
+                profile.id, task_type, run_status, trigger, schedule_id, date_from, date_to
+            ),
         )
         .returning(TaskRun.id)
     )

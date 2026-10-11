@@ -14,6 +14,8 @@ import type {
   PaperDetail,
   PaperSendInput,
   PaperStatus,
+  Profile,
+  ProfileInput,
   PublicSettings,
   QueryValidation,
   Recipient,
@@ -122,6 +124,19 @@ export function importTopicsYaml(file: File, mode: TopicImportMode, dryRun: bool
 
 export const listRecipients = (params: PageParams & { is_active?: boolean; q?: string }) =>
   api.get<Page<Recipient>>('/recipients', { params: clean(params) }).then((r) => r.data);
+
+// --- профили ---
+
+export const listProfiles = () => api.get<Profile[]>('/profiles').then((r) => r.data);
+
+export const createProfile = (data: ProfileInput) =>
+  api.post<Profile>('/profiles', data).then((r) => r.data);
+
+export const updateProfile = (id: number, data: ProfileInput) =>
+  api.patch<Profile>(`/profiles/${id}`, data).then((r) => r.data);
+
+export const deleteProfile = (id: number) =>
+  api.delete<void>(`/profiles/${id}`).then(() => undefined);
 
 export const createRecipient = (data: RecipientInput) =>
   api.post<Recipient>('/recipients', data).then((r) => r.data);

@@ -4,10 +4,35 @@ import axios from 'axios';
 import type { ApiErrorBody } from './types';
 
 const TOKEN_KEY = 'arxiv-digest.token';
+const PROFILE_KEY = 'arxiv-digest.profile';
 
 // Токен живёт в памяти и дублируется в localStorage, чтобы пережить перезагрузку страницы.
 let token: string | null = localStorage.getItem(TOKEN_KEY);
 let onUnauthorized: (() => void) | null = null;
+
+function storedProfileId(): number | null {
+  const value = Number(localStorage.getItem(PROFILE_KEY));
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+// Выбранный профиль уходит в каждом запросе заголовком X-Profile-Id: списки, создание
+// и очистка на backend работают только с его данными.
+let profileId: number | null = storedProfileId();
+let onProfileNotFound: (() => void) | null = null;
+
+export function getProfileId(): number | null {
+  return profileId;
+}
+
+export function setProfileId(value: number): void {
+  profileId = value;
+  localStorage.setItem(PROFILE_KEY, String(value));
+}
+
+/** Обработчик ответа «профиль не найден»: выбранный профиль удалён, список нужно перечитать. */
+export function setProfileNotFoundHandler(handler: (() => void) | null): void {
+  onProfileNotFound = handler;
+}
 
 export function getToken(): string | null {
   return token;
@@ -33,6 +58,9 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  if (profileId !== null) {
+    config.headers['X-Profile-Id'] = String(profileId);
+  }
   return config;
 });
 
@@ -43,6 +71,10 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !isLogin) {
       setToken(null);
       onUnauthorized?.();
+    }
+    const body = error.response?.data as Partial<ApiErrorBody> | undefined;
+    if (error.response?.status === 404 && body?.code === 'profile_not_found') {
+      onProfileNotFound?.();
     }
     return Promise.reject(error);
   },

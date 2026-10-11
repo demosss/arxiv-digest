@@ -25,6 +25,7 @@ MAX_ERROR_LENGTH = 4000
 def create_run(
     session: Session,
     *,
+    profile_id: int,
     task_type: TaskType,
     trigger: RunTrigger,
     params: dict[str, Any] | None = None,
@@ -34,6 +35,7 @@ def create_run(
     celery_task_id: str | None = None,
 ) -> TaskRun:
     run = TaskRun(
+        profile_id=profile_id,
         task_type=task_type,
         trigger=trigger,
         params=params or {},

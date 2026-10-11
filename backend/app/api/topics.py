@@ -5,7 +5,14 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, get_or_404, paginate
+from app.api.deps import (
+    CurrentUser,
+    PaginationDep,
+    ProfileDep,
+    SessionDep,
+    get_or_404,
+    paginate,
+)
 from app.core.errors import AppError, ConflictError
 from app.models import Topic
 from app.schemas.common import Page
@@ -42,11 +49,12 @@ MAX_IMPORT_BYTES = 1024 * 1024
 @router.get("", response_model=Page[TopicOut])
 async def list_topics(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     is_active: bool | None = None,
     q: Annotated[str | None, Query(description="Поиск по названию")] = None,
 ) -> Page[TopicOut]:
-    stmt = select(Topic).order_by(Topic.name)
+    stmt = select(Topic).where(Topic.profile_id == profile.id).order_by(Topic.name)
     if is_active is not None:
         stmt = stmt.where(Topic.is_active == is_active)
     if q:
@@ -61,8 +69,10 @@ async def list_topics(
 
 
 @router.post("", response_model=TopicOut, status_code=status.HTTP_201_CREATED)
-async def create_topic(payload: TopicCreate, session: SessionDep, user: CurrentUser) -> Topic:
-    topic = Topic(**payload.model_dump())
+async def create_topic(
+    payload: TopicCreate, session: SessionDep, profile: ProfileDep, user: CurrentUser
+) -> Topic:
+    topic = Topic(profile_id=profile.id, **payload.model_dump())
     session.add(topic)
     try:
         await session.commit()
@@ -103,10 +113,14 @@ async def preview(payload: TopicPreviewRequest, user: CurrentUser) -> TopicPrevi
 @router.get(
     "/export",
     response_class=Response,
-    responses={200: {"content": {"application/x-yaml": {}}, "description": "Все темы в YAML"}},
+    responses={200: {"content": {"application/x-yaml": {}}, "description": "Темы профиля в YAML"}},
 )
-async def export_topics(session: SessionDep, user: CurrentUser) -> Response:
-    topics = (await session.scalars(select(Topic).order_by(Topic.name))).all()
+async def export_topics(session: SessionDep, profile: ProfileDep, user: CurrentUser) -> Response:
+    topics = (
+        await session.scalars(
+            select(Topic).where(Topic.profile_id == profile.id).order_by(Topic.name)
+        )
+    ).all()
     audit("export", "topic", None, user.username, topics=len(topics))
     return Response(
         export_topics_yaml(topics),
@@ -118,6 +132,7 @@ async def export_topics(session: SessionDep, user: CurrentUser) -> Response:
 @router.post("/import", response_model=TopicImportReport)
 async def import_topics(
     session: SessionDep,
+    profile: ProfileDep,
     user: CurrentUser,
     file: Annotated[UploadFile, File(description="YAML с ключом topics")],
     mode: Annotated[
@@ -126,7 +141,7 @@ async def import_topics(
     ] = "merge",
     dry_run: Annotated[bool, Query(description="Только показать, что изменится")] = False,
 ) -> TopicImportReport:
-    """Импорт тем из YAML. Все запросы проверяются до записи: при любой ошибке не меняется ничего.
+    """Импорт тем профиля из YAML. Запросы проверяются до записи: при ошибке не меняется ничего.
 
     С `dry_run=true` ошибки возвращаются в отчёте (200), без него — ответом 422 `import_invalid`.
     """
@@ -143,7 +158,9 @@ async def import_topics(
 
     plan = ImportPlan()
     if not issues:
-        existing = (await session.scalars(select(Topic))).all()
+        existing = (
+            await session.scalars(select(Topic).where(Topic.profile_id == profile.id))
+        ).all()
         plan = plan_import(existing, items, mode)
     report = build_report(plan, issues, mode=mode, dry_run=dry_run)
 
@@ -154,7 +171,7 @@ async def import_topics(
             [issue.model_dump(exclude_none=True) for issue in issues],
         )
     if report.applied:
-        session.add_all(apply_plan(plan))
+        session.add_all(apply_plan(plan, profile.id))
         for topic in plan.deleted:
             await session.delete(topic)
         await session.commit()

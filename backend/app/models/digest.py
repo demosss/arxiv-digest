@@ -6,14 +6,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base, TimestampMixin
 from app.models.enums import DeliveryStatus, DigestContent, DigestStatus, enum_column
 from app.models.paper import Paper
+from app.models.profile import profile_column
 
 
 class Digest(TimestampMixin, Base):
     __tablename__ = "digests"
-    # один дайджест на период: повторная сборка обновляет ту же запись
-    __table_args__ = (UniqueConstraint("period_start", "period_end"),)
+    # один дайджест профиля на период: повторная сборка обновляет ту же запись
+    __table_args__ = (UniqueConstraint("profile_id", "period_start", "period_end"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = profile_column()
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     pdf_path: Mapped[str | None] = mapped_column(Text)

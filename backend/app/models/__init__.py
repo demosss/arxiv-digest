@@ -13,6 +13,7 @@ from app.models.enums import (
     TranslationStatus,
 )
 from app.models.paper import Paper, PaperTopic, Summary
+from app.models.profile import Profile
 from app.models.run import TaskLog, TaskRun
 from app.models.translation import Translation
 
@@ -28,6 +29,7 @@ __all__ = [
     "Paper",
     "PaperStatus",
     "PaperTopic",
+    "Profile",
     "Recipient",
     "Relevance",
     "RunStatus",

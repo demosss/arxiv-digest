@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import SessionDep
+from app.api.deps import ProfileDep, SessionDep
 from app.models import TaskLog, TaskRun, TaskType
 from app.schemas.runs import LogOut, LogPage
 
@@ -43,6 +43,7 @@ async def fetch_logs(
 @router.get("", response_model=LogPage)
 async def search_logs(
     session: SessionDep,
+    profile: ProfileDep,
     q: Annotated[str | None, Query(description="Поиск по тексту сообщения")] = None,
     level: LogLevel = None,
     run_id: int | None = None,
@@ -53,16 +54,18 @@ async def search_logs(
     limit: LogLimit = 200,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> LogPage:
-    """Общий поиск по логам всех запусков, новые записи сверху."""
-    stmt = select(TaskLog)
+    """Поиск по логам всех запусков профиля, новые записи сверху."""
+    stmt = (
+        select(TaskLog)
+        .join(TaskRun, TaskRun.id == TaskLog.run_id)
+        .where(TaskRun.profile_id == profile.id)
+    )
     if q:
         stmt = stmt.where(TaskLog.message.icontains(q, autoescape=True))
     if run_id is not None:
         stmt = stmt.where(TaskLog.run_id == run_id)
     if task_type is not None:
-        stmt = stmt.join(TaskRun, TaskRun.id == TaskLog.run_id).where(
-            TaskRun.task_type == task_type
-        )
+        stmt = stmt.where(TaskRun.task_type == task_type)
     if logger:
         stmt = stmt.where(TaskLog.logger.startswith(logger, autoescape=True))
     if date_from is not None:

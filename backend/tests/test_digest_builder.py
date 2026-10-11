@@ -35,6 +35,7 @@ from app.services.digest_builder import (
     split_summary,
 )
 from app.tasks.pipeline import build_digest_task
+from tests.conftest import PROFILE_ID
 from tests.factories import PERIOD_END, PERIOD_START, RUSSIAN_ABSTRACT, RUSSIAN_SUMMARY
 from tests.test_summarization import make_paper
 
@@ -58,8 +59,15 @@ def _summarized(
 
 @pytest.fixture
 def topics(db: Session) -> tuple[Topic, Topic]:
-    agents = Topic(name="Агенты", queries=['all:"agents"'], description="Агенты и инструменты")
-    llm = Topic(name="Языковые модели", queries=['all:"large language model"'])
+    agents = Topic(
+        profile_id=PROFILE_ID,
+        name="Агенты",
+        queries=['all:"agents"'],
+        description="Агенты и инструменты",
+    )
+    llm = Topic(
+        profile_id=PROFILE_ID, name="Языковые модели", queries=['all:"large language model"']
+    )
     db.add_all([agents, llm])
     db.commit()
     return agents, llm
@@ -67,7 +75,12 @@ def topics(db: Session) -> tuple[Topic, Topic]:
 
 def _build(db: Session, tmp_path: Path) -> Path:
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path / "digests", timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path / "digests",
+        timezone="Europe/Moscow",
     )
     return built.pdf_path
 
@@ -140,7 +153,7 @@ def test_pdf_is_created_with_cyrillic_text(
 
     pdf_path = _build(db, tmp_path)
 
-    assert pdf_path == tmp_path / "digests" / "digest_2024-10-05.pdf"
+    assert pdf_path == tmp_path / "digests" / str(PROFILE_ID) / "digest_2024-10-05.pdf"
     assert pdf_path.read_bytes().startswith(b"%PDF-")
     text = _pdf_text(pdf_path)
     # кириллица извлекается обратно: титул, оглавление, темы, резюме
@@ -206,7 +219,12 @@ def test_paper_in_several_topics_is_printed_once_with_reference(
     _summarized(db, "2410.00002", "Only Language Models", [llm])
 
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
 
     by_name = {section.name: section for section in built.sections}
@@ -242,7 +260,12 @@ def test_topic_the_paper_is_irrelevant_to_does_not_list_it(
     db.commit()
 
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
 
     assert [section.name for section in built.sections] == ["Языковые модели"]
@@ -279,6 +302,7 @@ def test_card_content_follows_digest_content(
         db,
         PERIOD_START,
         PERIOD_END,
+        profile_id=PROFILE_ID,
         digests_dir=tmp_path,
         timezone="Europe/Moscow",
         content=content,
@@ -303,6 +327,7 @@ def test_abstract_only_digest_falls_back_to_sections_for_old_summaries(
         db,
         PERIOD_START,
         PERIOD_END,
+        profile_id=PROFILE_ID,
         digests_dir=tmp_path,
         timezone="Europe/Moscow",
         content=DigestContent.ABSTRACT,
@@ -323,7 +348,12 @@ def test_only_summarized_papers_of_the_period_are_included(
     db.commit()
 
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
 
     assert built.digest.status == DigestStatus.READY
@@ -335,7 +365,12 @@ def test_only_summarized_papers_of_the_period_are_included(
 
 def test_empty_digest(db: Session, tmp_path: Path) -> None:
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
 
     assert built.digest.status == DigestStatus.EMPTY
@@ -349,13 +384,23 @@ def test_rebuild_updates_the_same_digest(
     db: Session, tmp_path: Path, topics: tuple[Topic, Topic]
 ) -> None:
     first = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
     assert first.digest.status == DigestStatus.EMPTY
 
     _summarized(db, "2410.00001", "Late Arrival", [topics[0]])
     second = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
 
     assert second.digest.id == first.digest.id
@@ -385,7 +430,9 @@ def test_build_digest_task_passes_digest_id_to_next_step(
     monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
     _summarized(db, "2410.00001", "Agents That Plan", [topics[0]])
     period = {"period_start": PERIOD_START.isoformat(), "period_end": PERIOD_END.isoformat()}
-    run = runs.create_run(db, task_type=TaskType.BUILD_DIGEST, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.BUILD_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     result = build_digest_task.apply(args=[period], kwargs={"run_id": run.id})
@@ -402,9 +449,11 @@ def test_build_digest_task_passes_digest_id_to_next_step(
     assert run.stats["content"] == "full"
     assert digest.content == DigestContent.FULL
     assert run.stats["pdf_size_bytes"] > 1000
-    assert (tmp_path / "digests" / "digest_2024-10-05.pdf").is_file()
+    assert (tmp_path / "digests" / str(PROFILE_ID) / "digest_2024-10-05.pdf").is_file()
 
-    again = runs.create_run(db, task_type=TaskType.BUILD_DIGEST, trigger=RunTrigger.MANUAL)
+    again = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.BUILD_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
     build_digest_task.apply(
         args=[{**period, "digest_content": "abstract"}], kwargs={"run_id": again.id}
@@ -418,7 +467,12 @@ async def test_digests_api(
 ) -> None:
     paper = _summarized(db, "2410.00001", "Agents That Plan", [topics[0]])
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
     digest_id = built.digest.id
 
@@ -466,10 +520,17 @@ async def test_delete_digest_removes_pdf_and_keeps_papers(
 ) -> None:
     paper = _summarized(db, "2410.00001", "Agents That Plan", [topics[0]])
     built = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
     digest_id = built.digest.id
-    run = runs.create_run(db, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SEND_DIGEST, trigger=RunTrigger.MANUAL
+    )
     db.commit()
 
     busy = await auth_client.delete(f"/api/digests/{digest_id}")
@@ -489,7 +550,12 @@ async def test_clear_digests_respects_filters(
     auth_client: AsyncClient, db: Session, tmp_path: Path
 ) -> None:
     empty = build_digest(
-        db, PERIOD_START, PERIOD_END, digests_dir=tmp_path, timezone="Europe/Moscow"
+        db,
+        PERIOD_START,
+        PERIOD_END,
+        profile_id=PROFILE_ID,
+        digests_dir=tmp_path,
+        timezone="Europe/Moscow",
     )
     assert empty.pdf_path.is_file()
 

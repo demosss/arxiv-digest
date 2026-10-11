@@ -5,11 +5,12 @@ import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
@@ -25,6 +26,7 @@ from app.models import (
     DigestDelivery,
     DigestPaper,
     DigestStatus,
+    Profile,
     Recipient,
     SmtpSecurity,
     SmtpSettings,
@@ -156,7 +158,13 @@ def _close(connection: smtplib.SMTP | None) -> None:
         connection.close()
 
 
-def digest_subject(digest: Digest) -> str:
+def digest_subject(profile_name: str, sent_at: datetime, tz: ZoneInfo) -> str:
+    """Тема письма: название профиля и дата рассылки в таймзоне сервиса."""
+    return f"arXiv Digest - {profile_name} - {sent_at.astimezone(tz).strftime(DATE_FORMAT)}"
+
+
+def digest_title(digest: Digest) -> str:
+    """Заголовок в теле письма: за какой период собран дайджест."""
     start = digest.period_start.astimezone(UTC).strftime(DATE_FORMAT)
     end = digest.period_end.astimezone(UTC).strftime(DATE_FORMAT)
     period = start if start == end else f"{start} — {end}"
@@ -181,21 +189,22 @@ def build_digest_message(
     papers: list[PaperLine],
     pdf: bytes,
     filename: str,
+    subject: str,
 ) -> EmailMessage:
     """Письмо HTML + текст с кратким списком статей и PDF во вложении."""
-    subject = digest_subject(digest)
+    title = digest_title(digest)
     message = _new_message(config, to_email, subject)
     if papers:
         lines = "\n".join(f"{i}. {p.title}\n   {p.abs_url}" for i, p in enumerate(papers, start=1))
         text = (
-            f"{subject}\n\nСтатей в выпуске: {len(papers)}. "
+            f"{title}\n\nСтатей в выпуске: {len(papers)}. "
             f"Полные резюме — во вложенном PDF.\n\n{lines}\n"
         )
     else:
-        text = f"{subject}\n\nЗа этот период подходящих статей не нашлось.\n"
+        text = f"{title}\n\nЗа этот период подходящих статей не нашлось.\n"
     message.set_content(text)
     message.add_alternative(
-        _env.get_template("email.html.j2").render(subject=subject, papers=papers), subtype="html"
+        _env.get_template("email.html.j2").render(title=title, papers=papers), subtype="html"
     )
     message.add_attachment(pdf, maintype="application", subtype="pdf", filename=filename)
     return message
@@ -236,8 +245,8 @@ def describe_error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def find_digest(session: Session, digest_id: int | None) -> Digest | None:
-    """Указанный дайджест либо последний со статусом ready."""
+def find_digest(session: Session, digest_id: int | None, profile_id: int) -> Digest | None:
+    """Указанный дайджест либо последний дайджест профиля со статусом ready."""
     stmt = select(Digest).options(
         selectinload(Digest.papers).selectinload(DigestPaper.paper),
         selectinload(Digest.deliveries),
@@ -245,7 +254,7 @@ def find_digest(session: Session, digest_id: int | None) -> Digest | None:
     if digest_id is not None:
         return session.scalar(stmt.where(Digest.id == digest_id))
     return session.scalar(
-        stmt.where(Digest.status == DigestStatus.READY).order_by(
+        stmt.where(Digest.profile_id == profile_id, Digest.status == DigestStatus.READY).order_by(
             Digest.period_end.desc(), Digest.id.desc()
         )
     )
@@ -257,11 +266,14 @@ class DigestMailer:
         session: Session,
         config: SmtpConfig,
         *,
+        timezone: str = "UTC",
         smtp_factory: SmtpFactory = open_connection,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._session = session
         self._config = config
+        # в этой таймзоне считается дата рассылки для темы письма
+        self._tz = ZoneInfo(timezone)
         self._smtp_factory = smtp_factory
         self._sleep = sleep
         self._connection: smtplib.SMTP | None = None
@@ -269,7 +281,7 @@ class DigestMailer:
         self._server_down: str | None = None
 
     def send(self, digest: Digest, *, force: bool = False) -> SendStats:
-        """Рассылает дайджест активным получателям и выставляет его итоговый статус.
+        """Рассылает дайджест активным получателям его профиля и выставляет итоговый статус.
 
         Получателю, которому этот дайджест уже доставлен, письмо повторно не уходит без `force`.
         """
@@ -282,9 +294,13 @@ class DigestMailer:
 
         emails = list(
             self._session.scalars(
-                select(Recipient.email).where(Recipient.is_active.is_(True)).order_by(Recipient.id)
+                select(Recipient.email)
+                .where(Recipient.profile_id == digest.profile_id, Recipient.is_active.is_(True))
+                .order_by(Recipient.id)
             )
         )
+        profile = self._session.get_one(Profile, digest.profile_id)
+        subject = digest_subject(profile.name, utcnow(), self._tz)
         stats.recipients_total = len(emails)
         deliveries = {d.email: d for d in digest.deliveries}
         log.info(
@@ -317,7 +333,7 @@ class DigestMailer:
                     continue
 
                 message = build_digest_message(
-                    self._config, email, digest, papers, pdf, pdf_path.name
+                    self._config, email, digest, papers, pdf, pdf_path.name, subject
                 )
                 if self._deliver(delivery, message):
                     stats.sent += 1
@@ -393,13 +409,14 @@ def run_send_digest(
     session: Session,
     settings: Settings,
     *,
+    profile_id: int,
     digest_id: int | None = None,
     force: bool = False,
     smtp_factory: SmtpFactory = open_connection,
     sleep: Callable[[float], None] = time.sleep,
 ) -> SendOutcome:
-    """Рассылает указанный (или последний готовый) дайджест с учётом правил пропуска."""
-    digest = find_digest(session, digest_id)
+    """Рассылает указанный (или последний готовый в профиле) дайджест с учётом правил пропуска."""
+    digest = find_digest(session, digest_id, profile_id)
     if digest is None:
         if digest_id is not None:
             raise MailerError(f"Дайджест {digest_id} не найден")
@@ -414,9 +431,9 @@ def run_send_digest(
         )
 
     config = load_smtp_config(session, settings)
-    stats = DigestMailer(session, config, smtp_factory=smtp_factory, sleep=sleep).send(
-        digest, force=force
-    )
+    stats = DigestMailer(
+        session, config, timezone=settings.tz, smtp_factory=smtp_factory, sleep=sleep
+    ).send(digest, force=force)
     if stats.recipients_total == 0:
         return SendOutcome(stats=stats, skip_reason="Нет активных получателей", digest_id=digest.id)
     if stats.sent + stats.skipped_already_sent == 0:

@@ -7,6 +7,7 @@ from app.api import (
     health,
     logs,
     papers,
+    profiles,
     recipients,
     runs,
     schedules,
@@ -25,6 +26,7 @@ api_router.include_router(auth.public_router)
 
 protected = APIRouter(dependencies=[Depends(get_current_user)])
 protected.include_router(auth.router)
+protected.include_router(profiles.router)
 protected.include_router(topics.router)
 protected.include_router(recipients.router)
 protected.include_router(schedules.router)

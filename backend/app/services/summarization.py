@@ -43,6 +43,8 @@ class SummarizeStats:
     summarized: int = 0
     failed: int = 0
     irrelevant: int = 0
+    # резюме скопировано у той же статьи другого профиля, без обращения к модели
+    reused: int = 0
     relevance_checks: int = 0
     llm_calls: int = 0
     chunks: int = 0
@@ -55,11 +57,16 @@ class SummarizeStats:
 
 
 def select_papers(
-    session: Session, paper_ids: Sequence[int] | None, *, retry_failed: bool = False
+    session: Session,
+    profile_id: int,
+    paper_ids: Sequence[int] | None,
+    *,
+    retry_failed: bool = False,
 ) -> list[Paper]:
-    """Статьи для суммаризации: переданные явно либо все со статусом text_extracted."""
+    """Статьи профиля для суммаризации: переданные явно либо все со статусом text_extracted."""
     stmt = (
         select(Paper)
+        .where(Paper.profile_id == profile_id)
         .options(
             undefer(Paper.full_text),
             selectinload(Paper.topic_links).selectinload(PaperTopic.topic),
@@ -105,6 +112,45 @@ def _save_summary(session: Session, paper: Paper, result: SummaryResult) -> None
     paper.status = PaperStatus.SUMMARIZED
     paper.error = None
     session.commit()
+
+
+def _reuse_summary(session: Session, paper: Paper) -> bool:
+    """Копирует готовое резюме той же версии статьи из другого профиля.
+
+    Локальная модель не тратит время на статью, которую уже суммаризировала.
+    Оценка релевантности темам при этом у каждого профиля своя.
+    """
+    donor = session.scalar(
+        select(Summary)
+        .join(Paper, Summary.paper_id == Paper.id)
+        .where(
+            Paper.arxiv_id == paper.arxiv_id,
+            Paper.version == paper.version,
+            Paper.profile_id != paper.profile_id,
+            Paper.status == PaperStatus.SUMMARIZED,
+            Summary.abstract_ru.is_not(None),
+        )
+        .order_by(Summary.updated_at.desc(), Summary.id.desc())
+        .limit(1)
+    )
+    if donor is None:
+        return False
+    summary = session.scalar(select(Summary).where(Summary.paper_id == paper.id))
+    if summary is None:
+        summary = Summary(paper_id=paper.id)
+        session.add(summary)
+    summary.text_ru = donor.text_ru
+    summary.abstract_ru = donor.abstract_ru
+    summary.model = donor.model
+    summary.prompt_tokens = donor.prompt_tokens
+    summary.completion_tokens = donor.completion_tokens
+    summary.duration_ms = donor.duration_ms
+    summary.chunks_count = donor.chunks_count
+    paper.status = PaperStatus.SUMMARIZED
+    paper.error = None
+    session.commit()
+    log.info("paper_summary_reused", from_paper_id=donor.paper_id)
+    return True
 
 
 def _is_relevant(
@@ -159,20 +205,22 @@ def summarize_papers(
     summarizer: PaperSummarizer,
     health: HealthCheck,
     *,
+    profile_id: int,
     paper_ids: Sequence[int] | None = None,
     retry_failed: bool = False,
     judge: RelevanceChecker | None = None,
 ) -> SummarizeStats:
-    """Суммаризирует статьи по одной. Ошибка статьи не прерывает остальные;
+    """Суммаризирует статьи профиля по одной. Ошибка статьи не прерывает остальные;
 
     с `judge` статья сначала проверяется на релевантность темам и, если не подошла ни к одной,
-    получает статус irrelevant вместо резюме. Явно выбранные статьи (`paper_ids`)
-    не проверяются.
+    получает статус irrelevant вместо резюме. Если ту же статью уже суммаризировал другой
+    профиль, резюме копируется оттуда. Явно выбранные статьи (`paper_ids`)
+    не проверяются и всегда суммаризируются заново.
 
     если недоступна сама модель, оставшиеся статьи помечаются failed
     и бросается LLMUnavailableError.
     """
-    papers = select_papers(session, paper_ids, retry_failed=retry_failed)
+    papers = select_papers(session, profile_id, paper_ids, retry_failed=retry_failed)
     stats = SummarizeStats(papers_total=len(papers))
     if not papers:
         log.info("summarize_nothing_to_do")
@@ -205,6 +253,10 @@ def summarize_papers(
                     stats.irrelevant += 1
                     consecutive_errors = 0
                     log.info("paper_irrelevant", topics=len(paper.topic_links))
+                    continue
+                if not paper_ids and _reuse_summary(session, paper):
+                    stats.reused += 1
+                    consecutive_errors = 0
                     continue
                 result = summarizer.summarize(paper.title, paper.abstract, paper.full_text or "")
             except LLMError as exc:
@@ -242,7 +294,7 @@ def summarize_papers(
 
 
 def fill_abstracts(
-    session: Session, summarizer: PaperSummarizer, health: HealthCheck
+    session: Session, summarizer: PaperSummarizer, health: HealthCheck, *, profile_id: int
 ) -> SummarizeStats:
     """Дописывает краткие аннотации статьям, у которых резюме создано до их появления.
 
@@ -253,7 +305,11 @@ def fill_abstracts(
         session.scalars(
             select(Paper)
             .join(Paper.summary)
-            .where(Paper.status == PaperStatus.SUMMARIZED, Summary.abstract_ru.is_(None))
+            .where(
+                Paper.profile_id == profile_id,
+                Paper.status == PaperStatus.SUMMARIZED,
+                Summary.abstract_ru.is_(None),
+            )
             .options(selectinload(Paper.summary))
             .order_by(Paper.id)
         ).all()

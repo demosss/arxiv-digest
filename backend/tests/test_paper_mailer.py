@@ -10,6 +10,7 @@ from app.models import Paper, Recipient, Translation, TranslationStatus
 from app.services.mailer import MailerConfigError, MailerError
 from app.services.paper_mailer import run_send_paper
 from app.tasks.pipeline import send_paper_task
+from tests.conftest import PROFILE_ID
 from tests.test_mailer import FakeSMTP, _smtp_settings
 from tests.test_translations_api import make_paper
 
@@ -44,7 +45,7 @@ def _translation(
 
 
 def _recipients(db: Session, *emails: str) -> list[int]:
-    rows = [Recipient(email=email) for email in emails]
+    rows = [Recipient(profile_id=PROFILE_ID, email=email) for email in emails]
     db.add_all(rows)
     db.commit()
     return [row.id for row in rows]

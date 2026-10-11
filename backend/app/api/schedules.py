@@ -1,7 +1,14 @@
 from fastapi import APIRouter, status
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, get_or_404, paginate
+from app.api.deps import (
+    CurrentUser,
+    PaginationDep,
+    ProfileDep,
+    SessionDep,
+    get_or_404,
+    paginate,
+)
 from app.models import Schedule
 from app.models.enums import TaskType
 from app.schemas.common import Page
@@ -43,11 +50,12 @@ async def validate_cron_expression(payload: CronValidateRequest) -> CronValidate
 @router.get("", response_model=Page[ScheduleOut])
 async def list_schedules(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     is_active: bool | None = None,
     task_type: TaskType | None = None,
 ) -> Page[ScheduleOut]:
-    stmt = select(Schedule).order_by(Schedule.id)
+    stmt = select(Schedule).where(Schedule.profile_id == profile.id).order_by(Schedule.id)
     if is_active is not None:
         stmt = stmt.where(Schedule.is_active == is_active)
     if task_type is not None:
@@ -63,9 +71,9 @@ async def list_schedules(
 
 @router.post("", response_model=ScheduleOut, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
-    payload: ScheduleCreate, session: SessionDep, user: CurrentUser
+    payload: ScheduleCreate, session: SessionDep, profile: ProfileDep, user: CurrentUser
 ) -> Schedule:
-    schedule = Schedule(**payload.model_dump())
+    schedule = Schedule(profile_id=profile.id, **payload.model_dump())
     _refresh_next_fire(schedule)
     session.add(schedule)
     await session.commit()

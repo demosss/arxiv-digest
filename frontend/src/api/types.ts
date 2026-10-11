@@ -28,6 +28,28 @@ export interface User {
   is_active: boolean;
 }
 
+// --- Профили ---
+
+export interface ProfileCounts {
+  topics: number;
+  recipients: number;
+  schedules: number;
+  papers: number;
+  digests: number;
+}
+
+export interface Profile {
+  id: number;
+  name: string;
+  counts: ProfileCounts;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileInput {
+  name: string;
+}
+
 export interface PublicSettings {
   timezone: string;
   app_env: string;

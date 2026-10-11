@@ -1,18 +1,18 @@
-"""Общие зависимости роутеров: сессия БД, текущий пользователь, пагинация."""
+"""Общие зависимости роутеров: сессия БД, текущий пользователь, профиль, пагинация."""
 
 from collections.abc import Sequence
 from typing import Annotated, Any
 
 import structlog
-from fastapi import Depends, Query, Request
+from fastapi import Depends, Header, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import Base, get_session
-from app.core.errors import NotFoundError, UnauthorizedError
+from app.core.errors import AppError, NotFoundError, UnauthorizedError
 from app.core.security import InvalidTokenError, decode_access_token
-from app.models import AdminUser
+from app.models import AdminUser, Profile
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -42,6 +42,30 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[AdminUser, Depends(get_current_user)]
+
+
+async def get_profile(
+    session: SessionDep,
+    x_profile_id: Annotated[
+        int | None,
+        Header(description="Профиль, с данными которого работает запрос; по умолчанию — первый"),
+    ] = None,
+) -> Profile:
+    """Профиль запроса: списки, создание и очистка работают только с его данными.
+
+    Запросы к объекту по id профиль не проверяют: объект сам знает, чей он.
+    """
+    if x_profile_id is not None:
+        profile = await session.get(Profile, x_profile_id)
+    else:
+        profile = await session.scalar(select(Profile).order_by(Profile.id).limit(1))
+    if profile is None:
+        raise AppError(404, "profile_not_found", "Профиль не найден")
+    structlog.contextvars.bind_contextvars(profile_id=profile.id)
+    return profile
+
+
+ProfileDep = Annotated[Profile, Depends(get_profile)]
 
 
 class Pagination:

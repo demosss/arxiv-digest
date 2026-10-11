@@ -82,3 +82,73 @@ def test_keywords_to_queries_migration_roundtrip(db: Session) -> None:
     finally:
         # схема должна вернуться на head, даже если проверка упала посередине
         command.upgrade(config, "head")
+
+
+def test_existing_data_moves_to_default_profile(db: Session) -> None:
+    config = Config("alembic.ini")
+    engine = get_sync_engine()
+
+    def profiles_of(table: str) -> list[str]:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    f"SELECT p.name FROM {table} t JOIN profiles p ON p.id = t.profile_id "
+                    "ORDER BY t.id"
+                )
+            )
+            return [row[0] for row in rows]
+
+    try:
+        command.downgrade(config, "0005")
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO topics (name) VALUES ('LLM')"))
+            conn.execute(text("INSERT INTO recipients (email) VALUES ('a@example.com')"))
+            conn.execute(
+                text(
+                    "INSERT INTO papers (arxiv_id, title, published_at, pdf_url, abs_url) "
+                    "VALUES ('2410.00001', 'Paper', now(), 'https://p', 'https://a')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO digests (period_start, period_end) "
+                    "VALUES ('2024-10-05 00:00+00', '2024-10-05 23:59:59+00')"
+                )
+            )
+            conn.execute(
+                text("INSERT INTO task_runs (task_type, trigger) VALUES ('collect', 'manual')")
+            )
+
+        command.upgrade(config, "head")
+
+        for table in ("topics", "recipients", "papers", "digests", "task_runs"):
+            assert profiles_of(table) == ["Основной"], table
+
+        # то же название темы и та же статья теперь допустимы в другом профиле
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO profiles (name) VALUES ('Второй')"))
+            conn.execute(
+                text(
+                    "INSERT INTO topics (profile_id, name) "
+                    "SELECT id, 'LLM' FROM profiles WHERE name = 'Второй'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO papers "
+                    "(profile_id, arxiv_id, title, published_at, pdf_url, abs_url) "
+                    "SELECT id, '2410.00001', 'Paper', now(), 'https://p', 'https://a' "
+                    "FROM profiles WHERE name = 'Второй'"
+                )
+            )
+
+        # откат оставляет данные первого профиля: прежняя схема знает один набор данных
+        command.downgrade(config, "0005")
+
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT name FROM topics")).scalars().all() == ["LLM"]
+            assert conn.execute(text("SELECT arxiv_id FROM papers")).scalars().all() == [
+                "2410.00001"
+            ]
+    finally:
+        command.upgrade(config, "head")
