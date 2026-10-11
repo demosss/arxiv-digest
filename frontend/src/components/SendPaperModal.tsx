@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { getProfileId } from '../api/client';
 import { getPaper, listRecipients, sendPaper } from '../api/endpoints';
 import type { PaperDetail, Recipient } from '../api/types';
 import { notifySuccess } from '../lib/queryClient';
 
-const RECIPIENTS_KEY = 'arxiv-digest.send-recipients';
+// у каждого профиля свои получатели — и свой запомненный выбор
+const recipientsKey = () => `arxiv-digest.send-recipients.${getProfileId() ?? 0}`;
 
 /** Что отметить при открытии окна; без подсказки отмечаются все доступные документы. */
 export interface SendPreset {
@@ -24,7 +26,7 @@ interface Props {
 
 function storedRecipients(): number[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem(RECIPIENTS_KEY) ?? '[]');
+    const value: unknown = JSON.parse(localStorage.getItem(recipientsKey()) ?? '[]');
     return Array.isArray(value) ? value.filter((id): id is number => typeof id === 'number') : [];
   } catch {
     return [];
@@ -64,7 +66,7 @@ function SendForm({
         translation_ids: translationIds,
       }),
     onSuccess: (run) => {
-      localStorage.setItem(RECIPIENTS_KEY, JSON.stringify(recipientIds));
+      localStorage.setItem(recipientsKey(), JSON.stringify(recipientIds));
       void queryClient.invalidateQueries({ queryKey: ['runs'] });
       notifySuccess(`Отправка поставлена в очередь: запуск №${run.id}`);
       onClose();

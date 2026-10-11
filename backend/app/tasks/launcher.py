@@ -62,6 +62,7 @@ def _log_enqueued(run: TaskRun) -> None:
     log.info(
         "run_enqueued",
         run_id=run.id,
+        profile_id=run.profile_id,
         task_type=run.task_type.value,
         trigger=run.trigger.value,
         schedule_id=run.schedule_id,
@@ -80,11 +81,15 @@ def publish_pipeline(steps: list[TaskRun], params: dict[str, Any]) -> None:
 
 def _launch_pipeline(
     session: Session,
+    profile_id: int,
     trigger: RunTrigger,
     params: dict[str, Any],
     schedule_id: int | None,
 ) -> TaskRun:
-    """Запускает full_pipeline, если он ещё не выполняется; иначе создаёт запуск skipped."""
+    """Запускает full_pipeline профиля, если он ещё не выполняется; иначе — запуск skipped.
+
+    Пайплайны разных профилей друг другу не мешают: их шаги встают в общие очереди.
+    """
     # блокировка до конца транзакции: два одновременных запуска не проскочат проверку оба
     session.execute(select(func.pg_advisory_xact_lock(PIPELINE_LOCK_KEY)))
     runs.fail_stale_runs(session, get_settings().pipeline_stale_hours)
@@ -92,6 +97,7 @@ def _launch_pipeline(
     active_id = session.scalar(
         select(TaskRun.id)
         .where(
+            TaskRun.profile_id == profile_id,
             TaskRun.task_type == TaskType.FULL_PIPELINE,
             TaskRun.status.in_(runs.ACTIVE_STATUSES),
         )
@@ -101,6 +107,7 @@ def _launch_pipeline(
         reason = f"Пайплайн уже выполняется (запуск #{active_id}), параллельный запуск пропущен"
         run = runs.create_run(
             session,
+            profile_id=profile_id,
             task_type=TaskType.FULL_PIPELINE,
             trigger=trigger,
             params=params,
@@ -111,6 +118,7 @@ def _launch_pipeline(
             "pipeline_skipped_already_running",
             run_id=run.id,
             active_run_id=active_id,
+            profile_id=profile_id,
             trigger=trigger.value,
             schedule_id=schedule_id,
         )
@@ -118,6 +126,7 @@ def _launch_pipeline(
 
     parent = runs.create_run(
         session,
+        profile_id=profile_id,
         task_type=TaskType.FULL_PIPELINE,
         trigger=trigger,
         params=params,
@@ -126,6 +135,7 @@ def _launch_pipeline(
     steps = [
         runs.create_run(
             session,
+            profile_id=profile_id,
             task_type=step,
             trigger=trigger,
             schedule_id=schedule_id,
@@ -148,15 +158,16 @@ def _launch_pipeline(
 def launch_run(
     session: Session,
     *,
+    profile_id: int,
     task_type: TaskType,
     trigger: RunTrigger,
     params: dict[str, Any] | None = None,
     schedule_id: int | None = None,
 ) -> TaskRun:
-    """Создаёт запись запуска и ставит задачу в очередь. Коммитит сессию."""
+    """Создаёт запись запуска в профиле и ставит задачу в очередь. Коммитит сессию."""
     params = params or {}
     if task_type == TaskType.FULL_PIPELINE:
-        return _launch_pipeline(session, trigger, params, schedule_id)
+        return _launch_pipeline(session, profile_id, trigger, params, schedule_id)
 
     task = STEP_TASKS.get(task_type)
     if task is None:
@@ -165,6 +176,7 @@ def launch_run(
         )
     run = runs.create_run(
         session,
+        profile_id=profile_id,
         task_type=task_type,
         trigger=trigger,
         params=params,

@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.orm import contains_eager
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
+from app.api.deps import CurrentUser, PaginationDep, ProfileDep, SessionDep, paginate
 from app.core.db import get_sync_sessionmaker
 from app.core.errors import ConflictError, NotFoundError
 from app.models import Paper, RunStatus, RunTrigger, TaskType, Translation, TranslationStatus
@@ -50,7 +50,11 @@ def start_translation(paper_id: int, language: str) -> int:
         params = {"translation_id": translation.id, "paper_id": paper_id, "language": language}
         # launch_run коммитит сессию: запись перевода появляется в БД раньше, чем стартует задача
         run = launcher.launch_run(
-            session, task_type=TaskType.TRANSLATE, trigger=RunTrigger.MANUAL, params=params
+            session,
+            profile_id=translation.paper.profile_id,
+            task_type=TaskType.TRANSLATE,
+            trigger=RunTrigger.MANUAL,
+            params=params,
         )
         translation.run_id = run.id
         if run.status == RunStatus.FAILED:
@@ -61,9 +65,13 @@ def start_translation(paper_id: int, language: str) -> int:
 
 
 def _conditions(
-    translation_status: TranslationStatus | None, language: str | None, q: str | None
+    profile_id: int,
+    translation_status: TranslationStatus | None,
+    language: str | None,
+    q: str | None,
 ) -> list[ColumnElement[bool]]:
-    conditions: list[ColumnElement[bool]] = []
+    # перевод принадлежит профилю своей статьи
+    conditions: list[ColumnElement[bool]] = [Paper.profile_id == profile_id]
     if translation_status is not None:
         conditions.append(Translation.status == translation_status)
     if language:
@@ -78,6 +86,7 @@ def _conditions(
 @router.get("", response_model=Page[TranslationListItem])
 async def list_translations(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     translation_status: Annotated[TranslationStatus | None, Query(alias="status")] = None,
     language: Annotated[str | None, Query(description="Код или название языка")] = None,
@@ -87,7 +96,7 @@ async def list_translations(
         select(Translation)
         .join(Translation.paper)
         .options(contains_eager(Translation.paper))
-        .where(*_conditions(translation_status, language, q))
+        .where(*_conditions(profile.id, translation_status, language, q))
         .order_by(Translation.updated_at.desc(), Translation.id.desc())
     )
     items, total = await paginate(session, stmt, pagination)
@@ -113,12 +122,13 @@ async def list_languages() -> list[LanguageOut]:
 @router.delete("", response_model=DeletedCount)
 async def clear_translations(
     session: SessionDep,
+    profile: ProfileDep,
     user: CurrentUser,
     translation_status: Annotated[TranslationStatus | None, Query(alias="status")] = None,
     language: Annotated[str | None, Query(description="Код или название языка")] = None,
     q: Annotated[str | None, Query(description="Поиск по названию статьи и arXiv ID")] = None,
 ) -> DeletedCount:
-    """Удаляет переводы под фильтрами (без фильтров — все) вместе с docx-файлами.
+    """Удаляет переводы профиля под фильтрами (без фильтров — все) вместе с docx-файлами.
 
     Переводы, которые ещё выполняются, не затрагиваются.
     """
@@ -127,7 +137,7 @@ async def clear_translations(
         .join(Translation.paper)
         .where(
             Translation.status.not_in(ACTIVE_STATUSES),
-            *_conditions(translation_status, language, q),
+            *_conditions(profile.id, translation_status, language, q),
         )
     )
     result = await session.execute(

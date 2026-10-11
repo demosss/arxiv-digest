@@ -18,3 +18,6 @@ frontend/dist/
 # Данные сервиса
 data/
 *.log
+
+# резервные копии базы
+backups/

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Paper, PaperStatus, PaperTopic, Topic
 from app.services.collector import Collector
+from tests.conftest import PROFILE_ID
 from tests.factories import PERIOD_END, PERIOD_START, FakeSource, fake_extractor, make_entry
 
 LLM_QUERY = 'all:"large language model"'
@@ -19,6 +20,7 @@ def _topic(
     categories: list[str] | None = None,
 ) -> Topic:
     topic = Topic(
+        profile_id=PROFILE_ID,
         name=name,
         queries=queries,
         arxiv_categories=["cs.CL"] if categories is None else categories,
@@ -38,7 +40,12 @@ def _collector(
 ) -> Collector:
     kwargs = {} if real_text else {"text_extractor": fake_extractor}
     return Collector(
-        db, source, papers_dir=tmp_path / "papers", max_results_per_topic=max_results, **kwargs
+        db,
+        source,
+        profile_id=PROFILE_ID,
+        papers_dir=tmp_path / "papers",
+        max_results_per_topic=max_results,
+        **kwargs,
     )
 
 
@@ -66,7 +73,8 @@ def test_collect_saves_papers_downloads_pdf_and_extracts_text(db: Session, tmp_p
         assert paper.text_chars == len(paper.full_text)
         assert paper.authors == ["Alice Smith", "Bob Jones"]
         assert paper.abs_url == f"https://arxiv.org/abs/{paper.arxiv_id}"
-    assert (tmp_path / "papers" / "2410.00001.pdf").is_file()
+    # файлы каждого профиля лежат в своём каталоге
+    assert (tmp_path / "papers" / str(PROFILE_ID) / "2410.00001.pdf").is_file()
 
     assert source.queries == [f"({LLM_QUERY}) AND (cat:cs.CL) AND {PERIOD_CLAUSE}"]
     assert stats.as_dict() == {
@@ -79,6 +87,7 @@ def test_collect_saves_papers_downloads_pdf_and_extracts_text(db: Session, tmp_p
         "query_errors": 0,
         "download_errors": 0,
         "text_extracted": 2,
+        "text_reused": 0,
         "topics": {
             "LLM": {
                 "found": 2,

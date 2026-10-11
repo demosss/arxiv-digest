@@ -163,8 +163,8 @@ def plan_import(
     return plan
 
 
-def apply_plan(plan: ImportPlan) -> list[Topic]:
-    """Меняет обновляемые темы на месте и возвращает новые; удаление — за вызывающим кодом."""
+def apply_plan(plan: ImportPlan, profile_id: int) -> list[Topic]:
+    """Меняет обновляемые темы на месте и возвращает новые темы профиля; удаление — снаружи."""
     for topic, data in plan.updated:
         topic.description = data.description
         topic.queries = list(data.queries)
@@ -172,6 +172,7 @@ def apply_plan(plan: ImportPlan) -> list[Topic]:
         topic.is_active = data.is_active
     return [
         Topic(
+            profile_id=profile_id,
             name=data.name,
             description=data.description,
             queries=list(data.queries),

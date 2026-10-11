@@ -17,6 +17,7 @@ from app.services.periods import previous_utc_day
 from app.tasks import pipeline
 from app.tasks.celery_app import celery_app
 from app.tasks.pipeline import collect_task
+from tests.conftest import PROFILE_ID
 from tests.factories import PERIOD_END, PERIOD_START, FakeSource, make_entry
 
 PERIOD = {"period_start": PERIOD_START.isoformat(), "period_end": PERIOD_END.isoformat()}
@@ -50,14 +51,26 @@ def published(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[dict[str, Any]]]
 
 def _run(db: Session, **kwargs: Any) -> TaskRun:
     run = runs.create_run(
-        db, task_type=TaskType.COLLECT, trigger=RunTrigger.MANUAL, params=PERIOD, **kwargs
+        db,
+        profile_id=PROFILE_ID,
+        task_type=TaskType.COLLECT,
+        trigger=RunTrigger.MANUAL,
+        params=PERIOD,
+        **kwargs,
     )
     db.commit()
     return run
 
 
 def _topic(db: Session) -> None:
-    db.add(Topic(name="LLM", queries=['all:"large language model"'], arxiv_categories=[]))
+    db.add(
+        Topic(
+            profile_id=PROFILE_ID,
+            name="LLM",
+            queries=['all:"large language model"'],
+            arxiv_categories=[],
+        )
+    )
     db.commit()
 
 
@@ -203,10 +216,16 @@ def test_secrets_are_masked_in_task_logs(
 
 
 def _pipeline(db: Session) -> tuple[TaskRun, list[TaskRun]]:
-    parent = runs.create_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    parent = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
     steps = [
         runs.create_run(
-            db, task_type=task_type, trigger=RunTrigger.SCHEDULE, parent_run_id=parent.id
+            db,
+            profile_id=PROFILE_ID,
+            task_type=task_type,
+            trigger=RunTrigger.SCHEDULE,
+            parent_run_id=parent.id,
         )
         for task_type in (
             TaskType.COLLECT,

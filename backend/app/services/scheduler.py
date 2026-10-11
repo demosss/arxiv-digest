@@ -72,7 +72,7 @@ def last_fire_time(expression: str, timezone: str, now: datetime | None = None) 
 
 
 # Функция постановки запуска в очередь: app.tasks.launcher.launch_run
-# (session, *, task_type, trigger, params, schedule_id) -> TaskRun
+# (session, *, profile_id, task_type, trigger, params, schedule_id) -> TaskRun
 LaunchFn = Callable[..., TaskRun]
 
 
@@ -139,6 +139,7 @@ def tick(session: Session, launch: LaunchFn, now: datetime | None = None) -> lis
         log.info(
             "schedule_fired",
             schedule_id=schedule.id,
+            profile_id=schedule.profile_id,
             name=schedule.name,
             task_type=schedule.task_type.value,
             due=due.isoformat(),
@@ -148,6 +149,7 @@ def tick(session: Session, launch: LaunchFn, now: datetime | None = None) -> lis
         fired.append(
             launch(
                 session,
+                profile_id=schedule.profile_id,
                 task_type=schedule.task_type,
                 trigger=RunTrigger.SCHEDULE,
                 params=run_params(schedule.task_type),

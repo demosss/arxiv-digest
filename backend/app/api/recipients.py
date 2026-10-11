@@ -4,7 +4,14 @@ from fastapi import APIRouter, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, get_or_404, paginate
+from app.api.deps import (
+    CurrentUser,
+    PaginationDep,
+    ProfileDep,
+    SessionDep,
+    get_or_404,
+    paginate,
+)
 from app.core.errors import ConflictError
 from app.models import Recipient
 from app.schemas.common import Page
@@ -13,17 +20,18 @@ from app.services.audit import apply_changes, audit
 
 router = APIRouter(prefix="/recipients", tags=["recipients"])
 
-_DUPLICATE = "Получатель с таким email уже существует"
+_DUPLICATE = "Получатель с таким email уже есть в этом профиле"
 
 
 @router.get("", response_model=Page[RecipientOut])
 async def list_recipients(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     is_active: bool | None = None,
     q: Annotated[str | None, Query(description="Поиск по email и имени")] = None,
 ) -> Page[RecipientOut]:
-    stmt = select(Recipient).order_by(Recipient.email)
+    stmt = select(Recipient).where(Recipient.profile_id == profile.id).order_by(Recipient.email)
     if is_active is not None:
         stmt = stmt.where(Recipient.is_active == is_active)
     if q:
@@ -44,9 +52,9 @@ async def list_recipients(
 
 @router.post("", response_model=RecipientOut, status_code=status.HTTP_201_CREATED)
 async def create_recipient(
-    payload: RecipientCreate, session: SessionDep, user: CurrentUser
+    payload: RecipientCreate, session: SessionDep, profile: ProfileDep, user: CurrentUser
 ) -> Recipient:
-    recipient = Recipient(**payload.model_dump())
+    recipient = Recipient(profile_id=profile.id, **payload.model_dump())
     session.add(recipient)
     try:
         await session.commit()

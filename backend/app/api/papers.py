@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
+from app.api.deps import CurrentUser, PaginationDep, ProfileDep, SessionDep, paginate
 from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
 from app.api.translations import start_translation
 from app.api.translations import to_out as translation_out
@@ -94,13 +94,14 @@ async def _translation_files(session: AsyncSession, paper_ids: Any) -> list[str 
 
 
 def _conditions(
+    profile_id: int,
     topic_id: int | None,
     paper_status: PaperStatus | None,
     date_from: datetime | None,
     date_to: datetime | None,
     q: str | None,
 ) -> list[ColumnElement[bool]]:
-    conditions: list[ColumnElement[bool]] = []
+    conditions: list[ColumnElement[bool]] = [Paper.profile_id == profile_id]
     if topic_id is not None:
         conditions.append(
             Paper.id.in_(select(PaperTopic.paper_id).where(PaperTopic.topic_id == topic_id))
@@ -121,6 +122,7 @@ def _conditions(
 @router.get("", response_model=Page[PaperOut])
 async def list_papers(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     topic_id: int | None = None,
     paper_status: Annotated[PaperStatus | None, Query(alias="status")] = None,
@@ -131,7 +133,7 @@ async def list_papers(
     stmt = (
         select(Paper)
         .options(*_LOAD_OPTIONS)
-        .where(*_conditions(topic_id, paper_status, date_from, date_to, q))
+        .where(*_conditions(profile.id, topic_id, paper_status, date_from, date_to, q))
         .order_by(Paper.published_at.desc(), Paper.id.desc())
     )
     items, total = await paginate(session, stmt, pagination)
@@ -146,6 +148,7 @@ async def list_papers(
 @router.delete("", response_model=DeletedCount)
 async def clear_papers(
     session: SessionDep,
+    profile: ProfileDep,
     user: CurrentUser,
     topic_id: int | None = None,
     paper_status: Annotated[PaperStatus | None, Query(alias="status")] = None,
@@ -153,9 +156,9 @@ async def clear_papers(
     date_to: Annotated[datetime | None, Query(description="Опубликована не позже")] = None,
     q: Annotated[str | None, Query(description="Поиск по названию и arXiv ID")] = None,
 ) -> DeletedCount:
-    """Удаляет статьи под фильтрами (без фильтров — все) с резюме, переводами и файлами."""
-    await ensure_no_active_runs(session)
-    conditions = _conditions(topic_id, paper_status, date_from, date_to, q)
+    """Удаляет статьи профиля под фильтрами (без фильтров — все) с резюме, переводами, файлами."""
+    await ensure_no_active_runs(session, profile.id)
+    conditions = _conditions(profile.id, topic_id, paper_status, date_from, date_to, q)
     docx_paths = await _translation_files(session, select(Paper.id).where(*conditions))
     result = await session.execute(delete(Paper).where(*conditions).returning(Paper.pdf_path))
     pdf_paths = result.scalars().all()
@@ -185,7 +188,10 @@ async def get_paper(paper_id: int, session: SessionDep) -> PaperDetail:
 @router.delete("/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_paper(paper_id: int, session: SessionDep, user: CurrentUser) -> None:
     """Удаляет статью с резюме, переводами и файлами; из состава дайджестов она тоже исчезает."""
-    await ensure_no_active_runs(session)
+    profile_id = await session.scalar(select(Paper.profile_id).where(Paper.id == paper_id))
+    if profile_id is None:
+        raise NotFoundError("Статья не найдена")
+    await ensure_no_active_runs(session, profile_id)
     docx_paths = await _translation_files(session, [paper_id])
     row = (
         await session.execute(
@@ -210,7 +216,7 @@ async def resummarize_paper(paper_id: int, session: SessionDep, user: CurrentUse
             "У статьи нет извлечённого текста — сначала нужен успешный сбор", code="no_text"
         )
     run_id = await run_in_threadpool(
-        launch_manual_run, TaskType.SUMMARIZE, {"paper_ids": [paper.id]}
+        launch_manual_run, paper.profile_id, TaskType.SUMMARIZE, {"paper_ids": [paper.id]}
     )
     audit("resummarize", "paper", paper.id, user.username, run_id=run_id, arxiv_id=paper.arxiv_id)
     return await load_run(session, run_id)
@@ -259,11 +265,15 @@ async def send_paper(
         if any(docx_file(translation) is None for translation in translations):
             raise ConflictError("Файл перевода ещё не готов", code="no_translation_file")
     found = await session.scalars(
-        select(Recipient.id).where(Recipient.id.in_(payload.recipient_ids))
+        select(Recipient.id).where(
+            Recipient.profile_id == paper.profile_id, Recipient.id.in_(payload.recipient_ids)
+        )
     )
     if len(found.all()) != len(payload.recipient_ids):
         raise NotFoundError("Получатель не найден")
     params = {"paper_id": paper.id, **payload.model_dump()}
-    run_id = await run_in_threadpool(launch_manual_run, TaskType.SEND_PAPER, params)
+    run_id = await run_in_threadpool(
+        launch_manual_run, paper.profile_id, TaskType.SEND_PAPER, params
+    )
     audit("send", "paper", paper.id, user.username, run_id=run_id, **payload.model_dump())
     return await load_run(session, run_id)

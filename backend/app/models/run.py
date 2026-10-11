@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin, utcnow
 from app.models.enums import RunStatus, RunTrigger, TaskType, enum_column
+from app.models.profile import profile_column
 
 
 class TaskRun(TimestampMixin, Base):
@@ -19,6 +20,8 @@ class TaskRun(TimestampMixin, Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # история запусков — не данные профиля: удаляется вместе с ним
+    profile_id: Mapped[int] = profile_column(ondelete="CASCADE", index=True)
     task_type: Mapped[TaskType] = enum_column(TaskType)
     trigger: Mapped[RunTrigger] = enum_column(RunTrigger)
     schedule_id: Mapped[int | None] = mapped_column(ForeignKey("schedules.id", ondelete="SET NULL"))

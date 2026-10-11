@@ -230,7 +230,9 @@ def run_send_paper(
         raise MailerError(f"Статья {paper_id} не найдена")
     emails = list(
         session.scalars(
-            select(Recipient.email).where(Recipient.id.in_(recipient_ids)).order_by(Recipient.email)
+            select(Recipient.email)
+            .where(Recipient.profile_id == paper.profile_id, Recipient.id.in_(recipient_ids))
+            .order_by(Recipient.email)
         )
     )
     if not emails:

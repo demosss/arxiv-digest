@@ -37,6 +37,7 @@ from app.services.scheduler import last_fire_time, next_fire_time, tick
 from app.tasks import launcher, pipeline
 from app.tasks.celery_app import celery_app
 from app.tasks.scheduler_tick import scheduler_tick
+from tests.conftest import PROFILE_ID
 from tests.factories import FakeLLM, FakeSource, make_entry
 from tests.test_mailer import RecordingSMTP, RecordingSMTPSSL
 
@@ -67,6 +68,7 @@ def _schedule(
     is_active: bool = True,
 ) -> Schedule:
     schedule = Schedule(
+        profile_id=PROFILE_ID,
         name=f"Расписание {cron}",
         task_type=task_type,
         cron_expression=cron,
@@ -119,6 +121,7 @@ def test_due_schedule_fires_once(db: Session) -> None:
     start, end = previous_utc_day()
     assert launch.calls == [
         {
+            "profile_id": PROFILE_ID,
             "task_type": TaskType.FULL_PIPELINE,
             "trigger": RunTrigger.SCHEDULE,
             "params": {"period_start": start.isoformat(), "period_end": end.isoformat()},
@@ -287,7 +290,11 @@ def test_pipeline_launch_creates_parent_and_four_steps(
     }
 
     parent = launcher.launch_run(
-        db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL, params=params
+        db,
+        profile_id=PROFILE_ID,
+        task_type=TaskType.FULL_PIPELINE,
+        trigger=RunTrigger.MANUAL,
+        params=params,
     )
 
     assert parent.status == RunStatus.QUEUED
@@ -316,9 +323,13 @@ def test_parallel_pipeline_is_skipped(
     db: Session, chains: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     configure_logging("worker")
-    first = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    first = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
 
-    second = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL)
+    second = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL
+    )
 
     assert second.status == RunStatus.SKIPPED
     assert second.error == (
@@ -332,7 +343,9 @@ def test_parallel_pipeline_is_skipped(
     # после завершения первого пайплайна новый запуск снова возможен
     for step in first.children:
         runs.finish_run(db, step, RunStatus.SUCCESS)
-    third = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL)
+    third = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL
+    )
     assert third.status == RunStatus.QUEUED
     assert len(chains) == 2
 
@@ -341,9 +354,13 @@ def test_single_steps_do_not_block_each_other(
     db: Session, chains: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pipeline.collect_task, "apply_async", lambda *args, **kwargs: None)
-    launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
 
-    step = launcher.launch_run(db, task_type=TaskType.COLLECT, trigger=RunTrigger.MANUAL)
+    step = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.COLLECT, trigger=RunTrigger.MANUAL
+    )
 
     assert step.status == RunStatus.QUEUED
 
@@ -351,7 +368,9 @@ def test_single_steps_do_not_block_each_other(
 def test_stale_pipeline_is_failed_and_does_not_block(
     db: Session, chains: list[dict[str, Any]]
 ) -> None:
-    stale = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    stale = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
     runs.mark_running(db, stale.children[0], "task-1")
     old = datetime.now(UTC) - timedelta(hours=get_settings().pipeline_stale_hours + 1)
     for member in (stale, *stale.children):
@@ -359,7 +378,9 @@ def test_stale_pipeline_is_failed_and_does_not_block(
     db.commit()
     db.expire_all()
 
-    fresh = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    fresh = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
 
     assert fresh.status == RunStatus.QUEUED
     db.refresh(stale)
@@ -369,7 +390,9 @@ def test_stale_pipeline_is_failed_and_does_not_block(
 
 
 def test_pipeline_with_recent_logs_is_not_stale(db: Session, chains: list[dict[str, Any]]) -> None:
-    active = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    active = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
     runs.mark_running(db, active.children[1], "task-2")
     old = datetime.now(UTC) - timedelta(hours=get_settings().pipeline_stale_hours + 1)
     for member in (active, *active.children):
@@ -380,7 +403,9 @@ def test_pipeline_with_recent_logs_is_not_stale(db: Session, chains: list[dict[s
     db.expire_all()
 
     assert runs.fail_stale_runs(db, get_settings().pipeline_stale_hours) == []
-    second = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    second = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
     assert second.status == RunStatus.SKIPPED
 
 
@@ -392,14 +417,18 @@ def test_broker_failure_fails_pipeline_and_steps(
 
     monkeypatch.setattr(launcher, "publish_pipeline", broken)
 
-    parent = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL)
+    parent = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL
+    )
 
     assert parent.status == RunStatus.FAILED
     assert parent.error and "Не удалось поставить задачу в очередь" in parent.error
     # упавший запуск не блокирует следующий
     monkeypatch.setattr(launcher, "publish_pipeline", lambda steps, params: None)
     assert (
-        launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL).status
+        launcher.launch_run(
+            db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL
+        ).status
         == RunStatus.QUEUED
     )
 
@@ -430,8 +459,8 @@ def test_scheduled_full_pipeline_end_to_end(
 
     db.add_all(
         [
-            Topic(name="LLM", queries=['all:"large language model"']),
-            Recipient(email="reader@example.com"),
+            Topic(profile_id=PROFILE_ID, name="LLM", queries=['all:"large language model"']),
+            Recipient(profile_id=PROFILE_ID, email="reader@example.com"),
             SmtpSettings(
                 id=SMTP_SETTINGS_ID,
                 host="smtp.test",
@@ -491,10 +520,12 @@ def test_failed_step_stops_the_chain(
             raise ValueError("arXiv вернул неожиданный ответ")
 
     monkeypatch.setattr(pipeline, "ArxivClient", lambda *args, **kwargs: BrokenSource())
-    db.add(Topic(name="LLM", queries=['all:"large language model"']))
+    db.add(Topic(profile_id=PROFILE_ID, name="LLM", queries=['all:"large language model"']))
     db.commit()
 
-    parent = launcher.launch_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL)
+    parent = launcher.launch_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.MANUAL
+    )
 
     db.refresh(parent)
     assert parent.status == RunStatus.FAILED
@@ -531,13 +562,20 @@ async def test_dashboard(
     monkeypatch.setattr(dashboard_api.health, "check_llm", fake_llm)
     soon = _schedule(db, next_fire_at=datetime.now(UTC) + timedelta(hours=1))
     _schedule(db, next_fire_at=datetime.now(UTC) + timedelta(hours=3), is_active=False)
-    done = runs.create_run(db, task_type=TaskType.COLLECT, trigger=RunTrigger.MANUAL)
+    done = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.COLLECT, trigger=RunTrigger.MANUAL
+    )
     runs.finish_run(db, done, RunStatus.SUCCESS)
-    failed = runs.create_run(db, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL)
+    failed = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.SUMMARIZE, trigger=RunTrigger.MANUAL
+    )
     runs.finish_run(db, failed, RunStatus.FAILED, error="boom")
-    running = runs.create_run(db, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE)
+    running = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.FULL_PIPELINE, trigger=RunTrigger.SCHEDULE
+    )
     db.add(
         Digest(
+            profile_id=PROFILE_ID,
             period_start=NOW,
             period_end=NOW + timedelta(hours=1),
             status=DigestStatus.SENT,

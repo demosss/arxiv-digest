@@ -26,6 +26,7 @@ from app.models import (
     Summary,
     Topic,
 )
+from app.services.files import profile_dir, remove_files
 from app.services.latex_text import latex_to_text
 from app.services.prompts import SUMMARY_SECTIONS
 
@@ -177,11 +178,12 @@ def card_content(summary: Summary, content: DigestContent) -> tuple[str, list[tu
     return abstract, split_summary(latex_to_text(summary.text_ru))
 
 
-def select_papers(session: Session, start: datetime, end: datetime) -> list[Paper]:
-    """Статьи периода с готовыми резюме, от новых к старым."""
+def select_papers(session: Session, profile_id: int, start: datetime, end: datetime) -> list[Paper]:
+    """Статьи профиля за период с готовыми резюме, от новых к старым."""
     stmt = (
         select(Paper)
         .where(
+            Paper.profile_id == profile_id,
             Paper.status == PaperStatus.SUMMARIZED,
             Paper.published_at >= start,
             Paper.published_at <= end,
@@ -302,11 +304,12 @@ def build_digest(
     period_start: datetime,
     period_end: datetime,
     *,
+    profile_id: int,
     digests_dir: Path,
     timezone: str,
     content: DigestContent = DigestContent.FULL,
 ) -> BuiltDigest:
-    """Собирает дайджест за период. Повторный вызов обновляет ту же запись и перезаписывает PDF.
+    """Собирает дайджест профиля за период. Повторный вызов обновляет ту же запись и PDF.
 
     `content` — что печатать в карточке статьи: аннотацию, разделы резюме или всё вместе.
     """
@@ -314,17 +317,22 @@ def build_digest(
     tz = ZoneInfo(timezone)
 
     digest = session.scalar(
-        select(Digest).where(Digest.period_start == period_start, Digest.period_end == period_end)
+        select(Digest).where(
+            Digest.profile_id == profile_id,
+            Digest.period_start == period_start,
+            Digest.period_end == period_end,
+        )
     )
     if digest is None:
-        digest = Digest(period_start=period_start, period_end=period_end)
+        digest = Digest(profile_id=profile_id, period_start=period_start, period_end=period_end)
         session.add(digest)
+    previous_pdf = digest.pdf_path
     digest.status = DigestStatus.BUILDING
     digest.error = None
     session.commit()
 
     try:
-        papers = select_papers(session, period_start, period_end)
+        papers = select_papers(session, profile_id, period_start, period_end)
         sections = build_sections(papers, tz, content)
         html = render_html(
             sections,
@@ -334,7 +342,7 @@ def build_digest(
             papers_count=len(papers),
             tz=tz,
         )
-        pdf_path = digests_dir / digest_filename(period_start, period_end)
+        pdf_path = profile_dir(digests_dir, profile_id) / digest_filename(period_start, period_end)
         pdf_size = render_pdf(html, pdf_path)
     except Exception as exc:
         session.rollback()
@@ -364,6 +372,9 @@ def build_digest(
     digest.content = content
     digest.status = DigestStatus.READY if papers else DigestStatus.EMPTY
     session.commit()
+    if previous_pdf and Path(previous_pdf) != pdf_path:
+        # дайджест собран до появления каталогов профилей: прежний файл больше не нужен
+        remove_files([previous_pdf])
 
     duration_ms = round((time.perf_counter() - started) * 1000)
     log.info(

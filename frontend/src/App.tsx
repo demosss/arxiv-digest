@@ -18,6 +18,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { DigestsPage } from './pages/DigestsPage';
 import { LoginPage } from './pages/LoginPage';
 import { PapersPage } from './pages/PapersPage';
+import { ProfilesPage } from './pages/ProfilesPage';
 import { RecipientsPage } from './pages/RecipientsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
 import { RunsPage } from './pages/RunsPage';
@@ -25,6 +26,7 @@ import { SchedulesPage } from './pages/SchedulesPage';
 import { SmtpPage } from './pages/SmtpPage';
 import { TopicsPage } from './pages/TopicsPage';
 import { TranslationsPage } from './pages/TranslationsPage';
+import { ProfileProvider } from './profile/ProfileContext';
 
 const theme = createTheme({ primaryColor: 'blue', defaultRadius: 'md' });
 
@@ -37,7 +39,9 @@ function ProtectedRoutes() {
   }
   return (
     <FormatProvider>
-      <Outlet />
+      <ProfileProvider>
+        <Outlet />
+      </ProfileProvider>
     </FormatProvider>
   );
 }
@@ -65,6 +69,7 @@ export function App() {
                       <Route path="papers" element={<PapersPage />} />
                       <Route path="digests" element={<DigestsPage />} />
                       <Route path="translations" element={<TranslationsPage />} />
+                      <Route path="profiles" element={<ProfilesPage />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
                     </Route>
                   </Route>

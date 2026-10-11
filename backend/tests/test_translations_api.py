@@ -27,6 +27,7 @@ from app.services.translation.service import (
     run_translation,
 )
 from app.tasks.pipeline import translate_task
+from tests.conftest import PROFILE_ID
 from tests.factories import RUSSIAN_PARAGRAPH, FakeTranslationLLM, make_entry
 from tests.test_translation_pdf import make_paper as make_pdf
 
@@ -82,6 +83,7 @@ def published(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def make_paper(db: Session, arxiv_id: str = "2610.00001", pdf_path: Path | None = None) -> Paper:
     entry = make_entry(arxiv_id, title="Roll Prediction for Surface Vehicles")
     paper = Paper(
+        profile_id=PROFILE_ID,
         arxiv_id=entry.arxiv_id,
         version=1,
         title=entry.title,
@@ -101,7 +103,9 @@ def make_paper(db: Session, arxiv_id: str = "2610.00001", pdf_path: Path | None 
 
 def _queued(db: Session, paper: Paper, language: str = "ru") -> tuple[Translation, TaskRun]:
     translation = prepare_translation(db, paper.id, language)
-    run = runs.create_run(db, task_type=TaskType.TRANSLATE, trigger=RunTrigger.MANUAL)
+    run = runs.create_run(
+        db, profile_id=PROFILE_ID, task_type=TaskType.TRANSLATE, trigger=RunTrigger.MANUAL
+    )
     translation.run_id = run.id
     db.commit()
     return translation, run
@@ -184,7 +188,7 @@ async def test_translation_from_html_is_built_and_downloaded(
         "fake-model",
         None,
     )
-    path = tmp_path / "translations" / "2610.00001_ru.docx"
+    path = tmp_path / "translations" / str(PROFILE_ID) / "2610.00001_ru.docx"
     assert translation.docx_path == str(path)
     texts = [paragraph.text for paragraph in open_docx(str(path)).paragraphs]
     assert RUSSIAN_PARAGRAPH in " ".join(texts)
@@ -226,7 +230,7 @@ def test_pdf_is_used_when_html_version_is_missing(db: Session, tmp_path: Path) -
     assert (translation.status, translation.source) == (TranslationStatus.READY, "pdf")
     # формула из PDF восстановлена моделью и набрана для редактора формул
     assert (stats["formulas"], stats["formulas_restored"], stats["formulas_editable"]) == (1, 1, 1)
-    assert (tmp_path / "translations" / "2610.00001_en.docx").is_file()
+    assert (tmp_path / "translations" / str(PROFILE_ID) / "2610.00001_en.docx").is_file()
 
 
 def test_failed_translation_keeps_reason(db: Session, tmp_path: Path) -> None:

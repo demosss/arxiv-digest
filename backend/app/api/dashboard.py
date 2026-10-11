@@ -8,7 +8,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import health
-from app.api.deps import SessionDep
+from app.api.deps import ProfileDep, SessionDep
 from app.core.config import get_settings
 from app.core.db import utcnow
 from app.models import (
@@ -76,22 +76,31 @@ async def _count(session: AsyncSession, stmt: Select[Any]) -> int:
 
 
 @router.get("", response_model=DashboardOut)
-async def dashboard(session: SessionDep) -> DashboardOut:
+async def dashboard(session: SessionDep, profile: ProfileDep) -> DashboardOut:
+    """Сводка по профилю; состояние LLM и SMTP у всех профилей общее."""
     since = utcnow() - COUNTERS_WINDOW
-    top_level = TaskRun.parent_run_id.is_(None)
+    top_level = (TaskRun.profile_id == profile.id) & TaskRun.parent_run_id.is_(None)
 
     counters = DashboardCounters(
         papers_collected=await _count(
-            session, select(func.count()).select_from(Paper).where(Paper.created_at >= since)
+            session,
+            select(func.count())
+            .select_from(Paper)
+            .where(Paper.profile_id == profile.id, Paper.created_at >= since),
         ),
         papers_summarized=await _count(
-            session, select(func.count()).select_from(Summary).where(Summary.updated_at >= since)
+            session,
+            select(func.count())
+            .select_from(Summary)
+            .join(Paper, Summary.paper_id == Paper.id)
+            .where(Paper.profile_id == profile.id, Summary.updated_at >= since),
         ),
         digests_sent=await _count(
             session,
             select(func.count())
             .select_from(Digest)
             .where(
+                Digest.profile_id == profile.id,
                 Digest.status.in_([DigestStatus.SENT, DigestStatus.PARTIALLY_SENT]),
                 Digest.updated_at >= since,
             ),
@@ -113,6 +122,7 @@ async def dashboard(session: SessionDep) -> DashboardOut:
         await session.scalar(
             select(TaskRun.id)
             .where(
+                TaskRun.profile_id == profile.id,
                 TaskRun.task_type == TaskType.FULL_PIPELINE,
                 TaskRun.status.in_(ACTIVE_STATUSES),
             )
@@ -121,7 +131,11 @@ async def dashboard(session: SessionDep) -> DashboardOut:
     ) is not None
     schedules = await session.scalars(
         select(Schedule)
-        .where(Schedule.is_active.is_(True), Schedule.next_fire_at.is_not(None))
+        .where(
+            Schedule.profile_id == profile.id,
+            Schedule.is_active.is_(True),
+            Schedule.next_fire_at.is_not(None),
+        )
         .order_by(Schedule.next_fire_at)
         .limit(UPCOMING_SCHEDULES)
     )

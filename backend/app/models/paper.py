@@ -1,24 +1,29 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin
 from app.models.admin import Topic
 from app.models.enums import PaperStatus, Relevance, enum_column
+from app.models.profile import profile_column
 
 
 class Paper(TimestampMixin, Base):
     __tablename__ = "papers"
     __table_args__ = (
+        # у каждого профиля своя запись статьи: статус, темы и переводы не общие
+        UniqueConstraint("profile_id", "arxiv_id"),
         Index("ix_papers_published_at", "published_at"),
         Index("ix_papers_status", "status"),
+        Index("ix_papers_arxiv_id", "arxiv_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = profile_column()
     # идентификатор без версии, например 2410.01234
-    arxiv_id: Mapped[str] = mapped_column(String(64), unique=True)
+    arxiv_id: Mapped[str] = mapped_column(String(64))
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     title: Mapped[str] = mapped_column(Text)
     authors: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}")

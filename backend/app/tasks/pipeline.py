@@ -39,6 +39,7 @@ def _collect(session: Session, run: TaskRun, context: Context) -> StepResult:
         collector = Collector(
             session,
             source,
+            profile_id=run.profile_id,
             papers_dir=settings.papers_dir,
             max_results_per_topic=settings.arxiv_max_results_per_topic,
         )
@@ -51,11 +52,13 @@ def _summarize(session: Session, run: TaskRun, context: Context) -> StepResult:
     llm = LLMClient.from_settings(settings)
     summarizer = Summarizer(llm, context_chars=settings.llm_context_chars)
     if context.get("fill_abstracts"):
-        return StepResult(stats=fill_abstracts(session, summarizer, llm).as_dict())
+        stats = fill_abstracts(session, summarizer, llm, profile_id=run.profile_id)
+        return StepResult(stats=stats.as_dict())
     stats = summarize_papers(
         session,
         summarizer,
         llm,
+        profile_id=run.profile_id,
         paper_ids=context.get("paper_ids"),
         retry_failed=bool(context.get("retry_failed")),
         judge=RelevanceJudge(llm) if settings.llm_relevance_check else None,
@@ -70,6 +73,7 @@ def _build_digest(session: Session, run: TaskRun, context: Context) -> StepResul
         session,
         period_start,
         period_end,
+        profile_id=run.profile_id,
         digests_dir=settings.digests_dir,
         timezone=settings.tz,
         content=DigestContent(context.get("digest_content") or settings.digest_content),
@@ -84,6 +88,7 @@ def _send_digest(session: Session, run: TaskRun, context: Context) -> StepResult
     outcome = run_send_digest(
         session,
         get_settings(),
+        profile_id=run.profile_id,
         digest_id=context.get("digest_id"),
         force=bool(context.get("force")),
     )

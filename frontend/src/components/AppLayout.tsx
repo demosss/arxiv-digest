@@ -7,6 +7,7 @@ import {
   Modal,
   NavLink,
   PasswordInput,
+  Select,
   Stack,
   Text,
   Title,
@@ -16,6 +17,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   IconClock,
   IconFileText,
+  IconFolders,
   IconLanguage,
   IconLayoutDashboard,
   IconLogout,
@@ -28,6 +30,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Fragment } from 'react';
 import { useForm } from 'react-hook-form';
 import { NavLink as RouterNavLink, Outlet, useLocation } from 'react-router-dom';
 import { z } from 'zod';
@@ -36,6 +39,7 @@ import { changePassword, getMe } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { useFormat } from '../lib/format';
 import { notifySuccess } from '../lib/queryClient';
+import { useProfile } from '../profile/ProfileContext';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Дашборд', icon: IconLayoutDashboard },
@@ -48,6 +52,8 @@ const NAV_ITEMS = [
   { to: '/digests', label: 'Дайджесты', icon: IconNews },
   { to: '/translations', label: 'Переводы', icon: IconLanguage },
 ];
+// администрирование профилей — отдельно, внизу колонки
+const PROFILES_ITEM = { to: '/profiles', label: 'Профили', icon: IconFolders };
 
 const passwordSchema = z
   .object({
@@ -119,8 +125,21 @@ export function AppLayout() {
   const [passwordOpened, password] = useDisclosure(false);
   const { logout } = useAuth();
   const { timezone } = useFormat();
+  const { profiles, current, select } = useProfile();
   const location = useLocation();
   const { data: user } = useQuery({ queryKey: ['me'], queryFn: getMe, staleTime: Infinity });
+
+  const navLink = (item: (typeof NAV_ITEMS)[number]) => (
+    <NavLink
+      key={item.to}
+      component={RouterNavLink}
+      to={item.to}
+      label={item.label}
+      leftSection={<item.icon size={18} stroke={1.6} />}
+      active={item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to)}
+      onClick={nav.close}
+    />
+  );
 
   return (
     <AppShell
@@ -133,6 +152,20 @@ export function AppLayout() {
           <Group gap="sm">
             <Burger opened={navOpened} onClick={nav.toggle} hiddenFrom="sm" size="sm" />
             <Title order={4}>arXiv Digest</Title>
+            <Select
+              aria-label="Профиль"
+              data={profiles.map((profile) => ({
+                value: String(profile.id),
+                label: profile.name,
+              }))}
+              value={String(current.id)}
+              onChange={(value) => value && select(Number(value))}
+              allowDeselect={false}
+              leftSection={<IconFolders size={16} stroke={1.6} />}
+              size="xs"
+              w={{ base: 150, sm: 240 }}
+              comboboxProps={{ width: 280, position: 'bottom-start' }}
+            />
           </Group>
           <Group gap="md">
             <Text size="xs" c="dimmed" visibleFrom="sm">
@@ -158,23 +191,15 @@ export function AppLayout() {
       </AppShell.Header>
 
       <AppShell.Navbar p="xs">
-        {NAV_ITEMS.map((item) => (
-          <NavLink
-            key={item.to}
-            component={RouterNavLink}
-            to={item.to}
-            label={item.label}
-            leftSection={<item.icon size={18} stroke={1.6} />}
-            active={
-              item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to)
-            }
-            onClick={nav.close}
-          />
-        ))}
+        <AppShell.Section grow>{NAV_ITEMS.map(navLink)}</AppShell.Section>
+        <AppShell.Section>{navLink(PROFILES_ITEM)}</AppShell.Section>
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Outlet />
+        {/* смена профиля пересоздаёт страницу: фильтры и открытые окна относились к прежнему */}
+        <Fragment key={current.id}>
+          <Outlet />
+        </Fragment>
       </AppShell.Main>
 
       <ChangePasswordModal opened={passwordOpened} onClose={password.close} />

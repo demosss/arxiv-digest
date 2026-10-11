@@ -9,7 +9,7 @@ from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
+from app.api.deps import CurrentUser, PaginationDep, ProfileDep, SessionDep, paginate
 from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
 from app.core.errors import ConflictError, NotFoundError
 from app.models import Digest, DigestPaper, DigestStatus, TaskRun, TaskType, Topic
@@ -68,9 +68,12 @@ async def load_digest(session: AsyncSession, digest_id: int) -> Digest:
 
 
 def _conditions(
-    digest_status: DigestStatus | None, date_from: datetime | None, date_to: datetime | None
+    profile_id: int,
+    digest_status: DigestStatus | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
 ) -> list[ColumnElement[bool]]:
-    conditions: list[ColumnElement[bool]] = []
+    conditions: list[ColumnElement[bool]] = [Digest.profile_id == profile_id]
     if digest_status is not None:
         conditions.append(Digest.status == digest_status)
     if date_from is not None:
@@ -83,6 +86,7 @@ def _conditions(
 @router.get("", response_model=Page[DigestOut])
 async def list_digests(
     session: SessionDep,
+    profile: ProfileDep,
     pagination: PaginationDep,
     digest_status: Annotated[DigestStatus | None, Query(alias="status")] = None,
     date_from: Annotated[datetime | None, Query(description="Период начинается не раньше")] = None,
@@ -90,7 +94,7 @@ async def list_digests(
 ) -> Page[DigestOut]:
     stmt = (
         select(Digest)
-        .where(*_conditions(digest_status, date_from, date_to))
+        .where(*_conditions(profile.id, digest_status, date_from, date_to))
         .order_by(Digest.period_end.desc(), Digest.id.desc())
     )
     items, total = await paginate(session, stmt, pagination)
@@ -105,16 +109,17 @@ async def list_digests(
 @router.delete("", response_model=DeletedCount)
 async def clear_digests(
     session: SessionDep,
+    profile: ProfileDep,
     user: CurrentUser,
     digest_status: Annotated[DigestStatus | None, Query(alias="status")] = None,
     date_from: Annotated[datetime | None, Query(description="Период начинается не раньше")] = None,
     date_to: Annotated[datetime | None, Query(description="Период кончается не позже")] = None,
 ) -> DeletedCount:
-    """Удаляет дайджесты под фильтрами (без фильтров — все) вместе с PDF и историей доставки."""
-    await ensure_no_active_runs(session)
+    """Удаляет дайджесты профиля под фильтрами (без фильтров — все) с PDF и историей доставки."""
+    await ensure_no_active_runs(session, profile.id)
     result = await session.execute(
         delete(Digest)
-        .where(*_conditions(digest_status, date_from, date_to))
+        .where(*_conditions(profile.id, digest_status, date_from, date_to))
         .returning(Digest.pdf_path)
     )
     pdf_paths = result.scalars().all()
@@ -154,7 +159,10 @@ async def get_digest(digest_id: int, session: SessionDep) -> DigestDetail:
 @router.delete("/{digest_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_digest(digest_id: int, session: SessionDep, user: CurrentUser) -> None:
     """Удаляет дайджест с PDF-файлом и историей доставки; сами статьи остаются."""
-    await ensure_no_active_runs(session)
+    profile_id = await session.scalar(select(Digest.profile_id).where(Digest.id == digest_id))
+    if profile_id is None:
+        raise NotFoundError("Дайджест не найден")
+    await ensure_no_active_runs(session, profile_id)
     row = (
         await session.execute(
             delete(Digest)
@@ -200,7 +208,7 @@ async def resend_digest(
 ) -> TaskRun:
     """Ставит в очередь повторную рассылку дайджеста.
 
-    По умолчанию письмо уходит всем активным получателям; с `force=false` — только тем,
+    По умолчанию письмо уходит всем активным получателям профиля; с `force=false` — только тем,
     кому дайджест ещё не доставлен.
     """
     digest = await session.get(Digest, digest_id)
@@ -210,6 +218,8 @@ async def resend_digest(
         raise ConflictError("У дайджеста нет PDF-файла: соберите его заново", code="no_pdf")
     force = payload.force if payload is not None else True
     params = {"digest_id": digest.id, "force": force}
-    run_id = await run_in_threadpool(launch_manual_run, TaskType.SEND_DIGEST, params)
+    run_id = await run_in_threadpool(
+        launch_manual_run, digest.profile_id, TaskType.SEND_DIGEST, params
+    )
     audit("resend", "digest", digest.id, user.username, run_id=run_id, force=force)
     return await load_run(session, run_id)
