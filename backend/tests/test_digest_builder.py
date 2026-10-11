@@ -28,6 +28,7 @@ from app.models import (
 from app.services import runs
 from app.services.digest_builder import (
     build_digest,
+    capitalize_first,
     digest_filename,
     format_authors,
     format_period,
@@ -106,12 +107,25 @@ def test_digest_filename() -> None:
 def test_split_summary_extracts_section_labels() -> None:
     parts = split_summary("Задача: первое.\n\nметод: второе.\nПросто абзац.\n\nЗначимость: итог.")
 
+    # текст раздела начинается с заглавной буквы, как и аннотация
     assert parts == [
-        ("Задача", "первое."),
-        ("Метод", "второе."),
+        ("Задача", "Первое."),
+        ("Метод", "Второе."),
         ("", "Просто абзац."),
-        ("Значимость", "итог."),
+        ("Значимость", "Итог."),
     ]
+
+
+def test_section_text_starts_with_capital_letter() -> None:
+    assert capitalize_first("авторы исследуют модели.") == "Авторы исследуют модели."
+    assert capitalize_first("the authors study models.") == "The authors study models."
+    assert capitalize_first("Уже с заглавной.") == "Уже с заглавной."
+    # обозначения с заглавной буквой или цифрой внутри не трогаются
+    assert capitalize_first("mAP вырос на 3%.") == "mAP вырос на 3%."
+    assert capitalize_first("x86-процессоры быстрее.") == "x86-процессоры быстрее."
+    assert capitalize_first("95% точности.") == "95% точности."
+    assert capitalize_first("«кавычки» в начале.") == "«кавычки» в начале."
+    assert capitalize_first("") == ""
 
 
 # --- генерация PDF ---

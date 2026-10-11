@@ -128,8 +128,26 @@ def digest_filename(start: datetime, end: datetime) -> str:
     return f"digest_{first.isoformat()}_{last.isoformat()}.pdf"
 
 
+def capitalize_first(text: str) -> str:
+    """Начинает текст с заглавной буквы.
+
+    Модель пишет «Задача: авторы исследуют…», и без названия раздела абзац начинался бы
+    со строчной. Слово с заглавной буквой или цифрой внутри («mAP», «x86») не трогается:
+    это обозначение, а не начало предложения.
+    """
+    words = text.split(maxsplit=1)
+    if not words or not words[0][0].islower():
+        return text
+    if any(char.isupper() or char.isdigit() for char in words[0]):
+        return text
+    return text[0].upper() + text[1:]
+
+
 def split_summary(text: str) -> list[tuple[str, str]]:
-    """Делит резюме на абзацы и отделяет названия разделов («Задача», «Метод», ...)."""
+    """Делит резюме на абзацы и отделяет названия разделов («Задача», «Метод», ...).
+
+    Текст каждого абзаца начинается с заглавной буквы — как и аннотация над ними.
+    """
     paragraphs: list[tuple[str, str]] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -138,10 +156,10 @@ def split_summary(text: str) -> list[tuple[str, str]]:
         for section in SUMMARY_SECTIONS:
             prefix = f"{section}:"
             if line.lower().startswith(prefix.lower()):
-                paragraphs.append((section, line[len(prefix) :].strip()))
+                paragraphs.append((section, capitalize_first(line[len(prefix) :].strip())))
                 break
         else:
-            paragraphs.append(("", line))
+            paragraphs.append(("", capitalize_first(line)))
     return paragraphs
 
 
@@ -153,7 +171,7 @@ def card_content(summary: Summary, content: DigestContent) -> tuple[str, list[tu
     """
     abstract = ""
     if content != DigestContent.SUMMARY:
-        abstract = latex_to_text(summary.abstract_ru or "")
+        abstract = capitalize_first(latex_to_text(summary.abstract_ru or ""))
     if content == DigestContent.ABSTRACT and abstract:
         return abstract, []
     return abstract, split_summary(latex_to_text(summary.text_ru))
