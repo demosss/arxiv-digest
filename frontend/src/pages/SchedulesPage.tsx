@@ -42,10 +42,13 @@ import {
 } from '../components/common';
 import { ALL_WEEKDAYS, WEEKDAYS, buildCron, parseSimpleCron } from '../lib/cron';
 import { useFormat } from '../lib/format';
-import { TASK_TYPE_LABELS, TASK_TYPE_OPTIONS } from '../lib/labels';
+import { LAUNCHABLE_TASK_TYPE_OPTIONS, TASK_TYPE_LABELS } from '../lib/labels';
 import { notifySuccess } from '../lib/queryClient';
 
-const TASK_TYPES = TASK_TYPE_OPTIONS.map((option) => option.value) as [TaskType, ...TaskType[]];
+const TASK_TYPES = LAUNCHABLE_TASK_TYPE_OPTIONS.map((option) => option.value) as [
+  TaskType,
+  ...TaskType[],
+];
 
 const schema = z
   .object({
@@ -240,7 +243,7 @@ function ScheduleModal({
               render={({ field }) => (
                 <Select
                   label="Тип задачи"
-                  data={TASK_TYPE_OPTIONS}
+                  data={LAUNCHABLE_TASK_TYPE_OPTIONS}
                   value={field.value}
                   onChange={(value) => value && field.onChange(value)}
                   allowDeselect={false}

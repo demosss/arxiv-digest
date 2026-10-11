@@ -10,9 +10,11 @@ from app.models.enums import (
     RunTrigger,
     SmtpSecurity,
     TaskType,
+    TranslationStatus,
 )
 from app.models.paper import Paper, PaperTopic, Summary
 from app.models.run import TaskLog, TaskRun
+from app.models.translation import Translation
 
 __all__ = [
     "SMTP_SETTINGS_ID",
@@ -38,4 +40,6 @@ __all__ = [
     "TaskRun",
     "TaskType",
     "Topic",
+    "Translation",
+    "TranslationStatus",
 ]

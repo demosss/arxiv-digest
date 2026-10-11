@@ -34,6 +34,8 @@ class RunCreate(BaseModel):
 
     @model_validator(mode="after")
     def check_period(self) -> "RunCreate":
+        if self.task_type == TaskType.TRANSLATE:
+            raise ValueError("Перевод запускается из карточки статьи: POST /papers/{id}/translate")
         try:
             if self.period_start is not None or self.period_end is not None:
                 resolve_period(self.period_start, self.period_end)

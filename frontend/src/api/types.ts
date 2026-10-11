@@ -140,7 +140,9 @@ export interface RecipientInput {
 
 // --- Расписания ---
 
-export type TaskType = 'full_pipeline' | 'collect' | 'summarize' | 'build_digest' | 'send_digest';
+// translate запускается только из карточки статьи: в расписаниях и ручном запуске его нет
+export type TaskType =
+  'full_pipeline' | 'collect' | 'summarize' | 'build_digest' | 'send_digest' | 'translate';
 
 export interface Schedule {
   id: number;
@@ -301,6 +303,40 @@ export interface PaperDetail extends Paper {
   updated_at_arxiv: string | null;
   updated_at: string;
   summary: Summary | null;
+  translations: Translation[];
+}
+
+// --- Переводы ---
+
+export type TranslationStatus = 'queued' | 'running' | 'ready' | 'failed';
+
+export interface TranslationLanguage {
+  code: string;
+  label: string;
+}
+
+export interface Translation {
+  id: number;
+  paper_id: number;
+  // код языка из списка либо название, введённое вручную
+  language: string;
+  language_label: string;
+  status: TranslationStatus;
+  // откуда взята структура статьи: HTML-версия arXiv или PDF
+  source: 'html' | 'pdf' | null;
+  error: string | null;
+  model: string | null;
+  run_id: number | null;
+  duration_ms: number;
+  has_file: boolean;
+  filename: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TranslationListItem extends Translation {
+  arxiv_id: string;
+  title: string;
 }
 
 // --- Дайджесты ---

@@ -19,6 +19,7 @@ from app.services.mailer import run_send_digest
 from app.services.periods import period_from_context, period_to_context
 from app.services.relevance import RelevanceJudge
 from app.services.summarization import fill_abstracts, summarize_papers
+from app.services.translation.service import run_translation
 from app.tasks.base import Context, StepResult, execute_step
 from app.tasks.celery_app import QUEUE_DEFAULT, QUEUE_LLM, QUEUE_MAIL, celery_app
 
@@ -91,6 +92,27 @@ def _send_digest(session: Session, run: TaskRun, context: Context) -> StepResult
     return StepResult(stats=stats, context={"digest_id": outcome.digest_id})
 
 
+def _translate(session: Session, run: TaskRun, context: Context) -> StepResult:
+    settings = get_settings()
+    with httpx.Client() as http:
+        fetcher = ArxivClient(
+            http,
+            request_delay=settings.arxiv_request_delay_seconds,
+            user_agent=settings.arxiv_user_agent,
+        )
+        stats = run_translation(
+            session,
+            int(context["translation_id"]),
+            run_id=run.id,
+            llm=LLMClient.from_settings(settings),
+            fetcher=fetcher,
+            translations_dir=settings.translations_dir,
+            chunk_chars=settings.llm_translate_chunk_chars,
+            max_tokens=settings.llm_translate_max_tokens,
+        )
+    return StepResult(stats=stats)
+
+
 @celery_app.task(
     name="pipeline.collect",
     bind=True,
@@ -137,3 +159,15 @@ def build_digest_task(self: Task, context: Context | None = None, *, run_id: int
 )
 def send_digest_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
     return execute_step(self, run_id, context, _send_digest)
+
+
+@celery_app.task(
+    name="pipeline.translate",
+    bind=True,
+    queue=QUEUE_LLM,
+    acks_late=True,
+    soft_time_limit=6 * HOUR,
+    time_limit=6 * HOUR + 300,
+)
+def translate_task(self: Task, context: Context | None = None, *, run_id: int) -> Context:
+    return execute_step(self, run_id, context, _translate)

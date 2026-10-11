@@ -12,6 +12,12 @@ def _validate_timezone(value: str) -> str:
     return value
 
 
+def _validate_task_type(value: TaskType | None) -> TaskType | None:
+    if value == TaskType.TRANSLATE:
+        raise ValueError("Перевод статьи нельзя запускать по расписанию")
+    return value
+
+
 def _validate_name(value: str) -> str:
     value = " ".join(value.split())
     if not value:
@@ -27,6 +33,7 @@ class ScheduleCreate(BaseModel):
     is_active: bool = True
 
     check_name = field_validator("name")(_validate_name)
+    check_task_type = field_validator("task_type")(_validate_task_type)
     check_cron = field_validator("cron_expression")(validate_cron)
     check_timezone = field_validator("timezone")(_validate_timezone)
 
@@ -42,6 +49,8 @@ class ScheduleUpdate(BaseModel):
     @classmethod
     def check_name(cls, value: str | None) -> str | None:
         return None if value is None else _validate_name(value)
+
+    check_task_type = field_validator("task_type")(_validate_task_type)
 
     @field_validator("cron_expression")
     @classmethod

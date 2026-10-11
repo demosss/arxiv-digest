@@ -11,6 +11,8 @@ class TaskType(StrEnum):
     SUMMARIZE = "summarize"
     BUILD_DIGEST = "build_digest"
     SEND_DIGEST = "send_digest"
+    # перевод одной статьи в docx; запускается из карточки статьи, в расписаниях не используется
+    TRANSLATE = "translate"
 
 
 class SmtpSecurity(StrEnum):
@@ -60,6 +62,13 @@ class DigestContent(StrEnum):
 class DeliveryStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"
+    FAILED = "failed"
+
+
+class TranslationStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    READY = "ready"
     FAILED = "failed"
 
 

@@ -9,6 +9,7 @@ import type {
   RunTrigger,
   SmtpSecurity,
   TaskType,
+  TranslationStatus,
 } from '../api/types';
 
 interface StatusView {
@@ -22,12 +23,18 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   summarize: 'Суммаризация',
   build_digest: 'Сборка дайджеста',
   send_digest: 'Рассылка',
+  translate: 'Перевод статьи',
 };
 
 export const TASK_TYPE_OPTIONS = (Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((value) => ({
   value,
   label: TASK_TYPE_LABELS[value],
 }));
+
+/** Задачи для ручного запуска и расписаний: перевод запускается только из карточки статьи. */
+export const LAUNCHABLE_TASK_TYPE_OPTIONS = TASK_TYPE_OPTIONS.filter(
+  (option) => option.value !== 'translate',
+);
 
 export const RUN_STATUS: Record<RunStatus, StatusView> = {
   queued: { label: 'В очереди', color: 'gray' },
@@ -65,6 +72,18 @@ export const DIGEST_STATUS: Record<DigestStatus, StatusView> = {
   partially_sent: { label: 'Отправлен частично', color: 'yellow' },
   failed: { label: 'Ошибка', color: 'red' },
   empty: { label: 'Пустой', color: 'gray' },
+};
+
+export const TRANSLATION_STATUS: Record<TranslationStatus, StatusView> = {
+  queued: { label: 'В очереди', color: 'gray' },
+  running: { label: 'Переводится', color: 'blue' },
+  ready: { label: 'Готов', color: 'green' },
+  failed: { label: 'Ошибка', color: 'red' },
+};
+
+export const TRANSLATION_SOURCE_LABELS: Record<string, string> = {
+  html: 'HTML arXiv',
+  pdf: 'PDF',
 };
 
 export const DIGEST_CONTENT_LABELS: Record<DigestContent, string> = {
@@ -163,6 +182,24 @@ const STAT_LABELS: Record<string, string> = {
   pdf_path: 'Файл',
   found: 'Найдено',
   new: 'Новых',
+  translation_id: 'Перевод №',
+  paper_id: 'Статья №',
+  arxiv_id: 'arXiv ID',
+  language: 'Язык',
+  source: 'Источник структуры',
+  segments: 'Фрагментов текста',
+  translated: 'Переведено',
+  untranslated: 'Осталось в оригинале',
+  formulas: 'Формул',
+  formulas_restored: 'Формул восстановлено из PDF',
+  formulas_editable: 'Формул набрано',
+  inline_formulas: 'Строчных формул',
+  paragraphs: 'Абзацев',
+  headings: 'Заголовков',
+  figures: 'Рисунков',
+  tables: 'Таблиц',
+  references: 'Записей литературы',
+  docx_size_bytes: 'Размер docx, байт',
 };
 
 export function statLabel(key: string): string {

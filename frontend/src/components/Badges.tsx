@@ -1,7 +1,21 @@
 import { Badge, type BadgeProps } from '@mantine/core';
 
-import type { DeliveryStatus, DigestStatus, PaperStatus, Relevance, RunStatus } from '../api/types';
-import { DELIVERY_STATUS, DIGEST_STATUS, PAPER_STATUS, RELEVANCE, RUN_STATUS } from '../lib/labels';
+import type {
+  DeliveryStatus,
+  DigestStatus,
+  PaperStatus,
+  Relevance,
+  RunStatus,
+  TranslationStatus,
+} from '../api/types';
+import {
+  DELIVERY_STATUS,
+  DIGEST_STATUS,
+  PAPER_STATUS,
+  RELEVANCE,
+  RUN_STATUS,
+  TRANSLATION_STATUS,
+} from '../lib/labels';
 
 type Props = Omit<BadgeProps, 'color' | 'children'>;
 
@@ -45,6 +59,18 @@ export function DeliveryStatusBadge({ status, ...props }: Props & { status: Deli
   const view = DELIVERY_STATUS[status];
   return (
     <Badge color={view.color} variant="light" {...props}>
+      {view.label}
+    </Badge>
+  );
+}
+
+export function TranslationStatusBadge({
+  status,
+  ...props
+}: Props & { status: TranslationStatus }) {
+  const view = TRANSLATION_STATUS[status];
+  return (
+    <Badge color={view.color} variant={status === 'running' ? 'filled' : 'light'} {...props}>
       {view.label}
     </Badge>
   );

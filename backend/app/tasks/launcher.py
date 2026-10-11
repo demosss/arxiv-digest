@@ -12,12 +12,14 @@ from app.core.errors import BadRequestError
 from app.core.logging import get_logger
 from app.models import RunStatus, RunTrigger, TaskRun, TaskType
 from app.services import runs
+from app.services.translation.service import fail_orphaned
 from app.tasks.celery_app import celery_app
 from app.tasks.pipeline import (
     build_digest_task,
     collect_task,
     send_digest_task,
     summarize_task,
+    translate_task,
 )
 
 log = get_logger(__name__)
@@ -27,6 +29,7 @@ STEP_TASKS: dict[TaskType, Task] = {
     TaskType.SUMMARIZE: summarize_task,
     TaskType.BUILD_DIGEST: build_digest_task,
     TaskType.SEND_DIGEST: send_digest_task,
+    TaskType.TRANSLATE: translate_task,
 }
 PIPELINE_STEPS = (
     TaskType.COLLECT,
@@ -187,6 +190,9 @@ def cancel_run(session: Session, run: TaskRun) -> list[int]:
             celery_app.control.revoke(target.celery_task_id, terminate=True, signal="SIGTERM")
         runs.finish_run(session, target, RunStatus.CANCELLED, error="Отменено пользователем")
         cancelled.append(target.id)
+    # отозванная задача перевода завершается сигналом и свой статус уже не обновит
+    fail_orphaned(session)
+    session.commit()
     session.refresh(run)
     log.info("run_cancelled", run_id=run.id, cancelled_run_ids=cancelled)
     return cancelled

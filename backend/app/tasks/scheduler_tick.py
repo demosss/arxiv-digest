@@ -5,6 +5,7 @@ from app.core.db import get_sync_sessionmaker
 from app.core.logging import get_logger
 from app.services import runs
 from app.services.scheduler import tick
+from app.services.translation.service import fail_orphaned
 from app.tasks.celery_app import QUEUE_DEFAULT, celery_app
 from app.tasks.launcher import launch_run
 
@@ -22,6 +23,7 @@ def scheduler_tick() -> int:
     """Запускает расписания, время которых подошло. Возвращает число срабатываний."""
     with get_sync_sessionmaker()() as session:
         stale = runs.fail_stale_runs(session, get_settings().pipeline_stale_hours)
+        fail_orphaned(session)
         session.commit()
         if stale:
             log.warning("stale_runs_failed", run_ids=stale)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, status
 from fastapi.concurrency import run_in_threadpool
@@ -9,11 +9,14 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, PaginationDep, SessionDep, paginate
 from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
+from app.api.translations import start_translation
+from app.api.translations import to_out as translation_out
 from app.core.errors import ConflictError, NotFoundError
-from app.models import Paper, PaperStatus, PaperTopic, TaskRun, TaskType
+from app.models import Paper, PaperStatus, PaperTopic, TaskRun, TaskType, Translation
 from app.schemas.common import DeletedCount, Page
 from app.schemas.papers import PaperDetail, PaperOut, PaperTopicOut, SummaryOut
 from app.schemas.runs import RunDetail
+from app.schemas.translations import TranslateRequest, TranslationOut
 from app.services.audit import audit
 from app.services.files import remove_files
 
@@ -64,6 +67,14 @@ async def _load_paper(session: AsyncSession, paper_id: int) -> Paper:
     if paper is None:
         raise NotFoundError("Статья не найдена")
     return paper
+
+
+async def _translation_files(session: AsyncSession, paper_ids: Any) -> list[str | None]:
+    """Файлы переводов статей: записи удалит каскад, а файлы нужно убрать самим."""
+    rows = await session.scalars(
+        select(Translation.docx_path).where(Translation.paper_id.in_(paper_ids))
+    )
+    return list(rows.all())
 
 
 def _conditions(
@@ -126,16 +137,14 @@ async def clear_papers(
     date_to: Annotated[datetime | None, Query(description="Опубликована не позже")] = None,
     q: Annotated[str | None, Query(description="Поиск по названию и arXiv ID")] = None,
 ) -> DeletedCount:
-    """Удаляет статьи под фильтрами (без фильтров — все) вместе с резюме и PDF-файлами."""
+    """Удаляет статьи под фильтрами (без фильтров — все) с резюме, переводами и файлами."""
     await ensure_no_active_runs(session)
-    result = await session.execute(
-        delete(Paper)
-        .where(*_conditions(topic_id, paper_status, date_from, date_to, q))
-        .returning(Paper.pdf_path)
-    )
+    conditions = _conditions(topic_id, paper_status, date_from, date_to, q)
+    docx_paths = await _translation_files(session, select(Paper.id).where(*conditions))
+    result = await session.execute(delete(Paper).where(*conditions).returning(Paper.pdf_path))
     pdf_paths = result.scalars().all()
     await session.commit()
-    files = await run_in_threadpool(remove_files, pdf_paths)
+    files = await run_in_threadpool(remove_files, [*pdf_paths, *docx_paths])
     audit("clear", "paper", None, user.username, deleted=len(pdf_paths), files_removed=files)
     return DeletedCount(deleted=len(pdf_paths))
 
@@ -143,19 +152,24 @@ async def clear_papers(
 @router.get("/{paper_id}", response_model=PaperDetail)
 async def get_paper(paper_id: int, session: SessionDep) -> PaperDetail:
     paper = await _load_paper(session, paper_id)
+    translations = await session.scalars(
+        select(Translation).where(Translation.paper_id == paper_id).order_by(Translation.language)
+    )
     return PaperDetail(
         **_to_out(paper).model_dump(),
         abstract=paper.abstract,
         updated_at_arxiv=paper.updated_at_arxiv,
         updated_at=paper.updated_at,
         summary=SummaryOut.model_validate(paper.summary) if paper.summary else None,
+        translations=[translation_out(item) for item in translations],
     )
 
 
 @router.delete("/{paper_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_paper(paper_id: int, session: SessionDep, user: CurrentUser) -> None:
-    """Удаляет статью с резюме и PDF-файлом; из состава дайджестов она тоже исчезает."""
+    """Удаляет статью с резюме, переводами и файлами; из состава дайджестов она тоже исчезает."""
     await ensure_no_active_runs(session)
+    docx_paths = await _translation_files(session, [paper_id])
     row = (
         await session.execute(
             delete(Paper).where(Paper.id == paper_id).returning(Paper.arxiv_id, Paper.pdf_path)
@@ -164,7 +178,7 @@ async def delete_paper(paper_id: int, session: SessionDep, user: CurrentUser) ->
     if row is None:
         raise NotFoundError("Статья не найдена")
     await session.commit()
-    await run_in_threadpool(remove_files, [row.pdf_path])
+    await run_in_threadpool(remove_files, [row.pdf_path, *docx_paths])
     audit("delete", "paper", paper_id, user.username, arxiv_id=row.arxiv_id)
 
 
@@ -183,3 +197,26 @@ async def resummarize_paper(paper_id: int, session: SessionDep, user: CurrentUse
     )
     audit("resummarize", "paper", paper.id, user.username, run_id=run_id, arxiv_id=paper.arxiv_id)
     return await load_run(session, run_id)
+
+
+@router.post(
+    "/{paper_id}/translate", response_model=TranslationOut, status_code=status.HTTP_202_ACCEPTED
+)
+async def translate_paper(
+    paper_id: int, payload: TranslateRequest, session: SessionDep, user: CurrentUser
+) -> TranslationOut:
+    """Ставит в очередь перевод статьи в docx; прежний перевод на этот язык будет заменён."""
+    translation_id = await run_in_threadpool(start_translation, paper_id, payload.language)
+    translation = await session.get(Translation, translation_id, populate_existing=True)
+    if translation is None:
+        raise NotFoundError("Перевод не найден")
+    audit(
+        "translate",
+        "paper",
+        paper_id,
+        user.username,
+        translation_id=translation.id,
+        run_id=translation.run_id,
+        language=payload.language,
+    )
+    return translation_out(translation)

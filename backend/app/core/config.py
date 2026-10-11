@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     llm_concurrency: int = Field(default=1, ge=1)
     llm_extra_body: dict[str, Any] = Field(default_factory=dict)
     llm_relevance_check: bool = True
+    # перевод статей: размер порции текста на один запрос и лимит токенов ответа
+    llm_translate_chunk_chars: int = Field(default=3000, ge=500)
+    llm_translate_max_tokens: int = Field(default=3000, gt=0)
 
     # --- SMTP: из окружения берётся только пароль ---
     smtp_password: SecretStr | None = None
@@ -109,6 +112,10 @@ class Settings(BaseSettings):
     @property
     def digests_dir(self) -> Path:
         return self.data_dir / "digests"
+
+    @property
+    def translations_dir(self) -> Path:
+        return self.data_dir / "translations"
 
     @property
     def logs_dir(self) -> Path:
