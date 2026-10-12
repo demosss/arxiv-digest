@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pymupdf
@@ -29,11 +30,11 @@ from app.services import runs
 from app.services.digest_builder import (
     build_digest,
     capitalize_first,
-    digest_filename,
     format_authors,
     format_period,
     split_summary,
 )
+from app.services.files import digest_filename, profile_slug
 from app.tasks.pipeline import build_digest_task
 from tests.conftest import PROFILE_ID
 from tests.factories import PERIOD_END, PERIOD_START, RUSSIAN_ABSTRACT, RUSSIAN_SUMMARY
@@ -115,6 +116,19 @@ def test_digest_filename() -> None:
         digest_filename(PERIOD_START, PERIOD_END + timedelta(days=2))
         == "digest_2024-10-05_2024-10-07.pdf"
     )
+
+
+def test_digest_filename_with_profile() -> None:
+    assert digest_filename(PERIOD_START, PERIOD_END, "Основной") == "digest_Основной_2024-10-05.pdf"
+    assert (
+        digest_filename(PERIOD_START, PERIOD_END + timedelta(days=2), "Computer Vision")
+        == "digest_Computer-Vision_2024-10-05_2024-10-07.pdf"
+    )
+    # пробелы и запрещённые в именах файлов символы — одним дефисом, по краям не остаются
+    assert profile_slug(' A/B: "тест" <1>|? ') == "A-B-тест-1"
+    assert profile_slug("x" * 80) == "x" * 50
+    # от названия ничего не осталось — имя как без профиля
+    assert digest_filename(PERIOD_START, PERIOD_END, "///") == "digest_2024-10-05.pdf"
 
 
 def test_split_summary_extracts_section_labels() -> None:
@@ -483,7 +497,9 @@ async def test_digests_api(
     assert item["content"] == "full"
     assert item["papers_count"] == 1
     assert item["has_pdf"] is True
-    assert item["filename"] == "digest_2024-10-05.pdf"
+    # на диске имя без профиля, наружу — с названием профиля
+    assert built.pdf_path.name == "digest_2024-10-05.pdf"
+    assert item["filename"] == "digest_Основной_2024-10-05.pdf"
     assert "pdf_path" not in item
 
     assert (await auth_client.get("/api/digests", params={"status": "sent"})).json()["total"] == 0
@@ -501,11 +517,12 @@ async def test_digests_api(
         }
     ]
     assert detail["deliveries"] == []
+    assert detail["filename"] == "digest_Основной_2024-10-05.pdf"
 
     pdf = await auth_client.get(f"/api/digests/{digest_id}/pdf")
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
-    assert "digest_2024-10-05.pdf" in pdf.headers["content-disposition"]
+    assert quote("digest_Основной_2024-10-05.pdf") in pdf.headers["content-disposition"]
     assert pdf.content.startswith(b"%PDF-")
 
     built.pdf_path.unlink()

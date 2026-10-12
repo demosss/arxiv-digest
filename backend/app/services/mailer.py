@@ -31,6 +31,7 @@ from app.models import (
     SmtpSecurity,
     SmtpSettings,
 )
+from app.services.files import digest_filename
 
 log = get_logger(__name__)
 
@@ -288,8 +289,7 @@ class DigestMailer:
         stats = SendStats(digest_id=digest.id)
         if not digest.pdf_path or not Path(digest.pdf_path).is_file():
             raise MailerError(f"PDF-файл дайджеста {digest.id} не найден: соберите дайджест заново")
-        pdf_path = Path(digest.pdf_path)
-        pdf = pdf_path.read_bytes()
+        pdf = Path(digest.pdf_path).read_bytes()
         papers = [PaperLine(item.paper.title, item.paper.abs_url) for item in digest.papers]
 
         emails = list(
@@ -301,6 +301,7 @@ class DigestMailer:
         )
         profile = self._session.get_one(Profile, digest.profile_id)
         subject = digest_subject(profile.name, utcnow(), self._tz)
+        filename = digest_filename(digest.period_start, digest.period_end, profile.name)
         stats.recipients_total = len(emails)
         deliveries = {d.email: d for d in digest.deliveries}
         log.info(
@@ -333,7 +334,7 @@ class DigestMailer:
                     continue
 
                 message = build_digest_message(
-                    self._config, email, digest, papers, pdf, pdf_path.name, subject
+                    self._config, email, digest, papers, pdf, filename, subject
                 )
                 if self._deliver(delivery, message):
                     stats.sent += 1

@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import CurrentUser, PaginationDep, ProfileDep, SessionDep, paginate
 from app.api.runs import ensure_no_active_runs, launch_manual_run, load_run
 from app.core.errors import ConflictError, NotFoundError
-from app.models import Digest, DigestPaper, DigestStatus, TaskRun, TaskType, Topic
+from app.models import Digest, DigestPaper, DigestStatus, Profile, TaskRun, TaskType, Topic
 from app.schemas.common import DeletedCount, Page
 from app.schemas.digests import (
     DeliveryOut,
@@ -23,7 +23,7 @@ from app.schemas.digests import (
 )
 from app.schemas.runs import RunDetail
 from app.services.audit import audit
-from app.services.files import remove_files
+from app.services.files import digest_filename, remove_files
 
 router = APIRouter(prefix="/digests", tags=["digests"])
 
@@ -35,8 +35,13 @@ def _pdf_file(digest: Digest) -> Path | None:
     return path if path.is_file() else None
 
 
-def _to_out(digest: Digest) -> DigestOut:
+async def _profile_name(session: AsyncSession, digest: Digest) -> str:
+    return (await session.get_one(Profile, digest.profile_id)).name
+
+
+def _to_out(digest: Digest, profile_name: str) -> DigestOut:
     pdf = _pdf_file(digest)
+    filename = digest_filename(digest.period_start, digest.period_end, profile_name)
     return DigestOut(
         id=digest.id,
         period_start=digest.period_start,
@@ -46,7 +51,7 @@ def _to_out(digest: Digest) -> DigestOut:
         content=digest.content,
         error=digest.error,
         has_pdf=pdf is not None,
-        filename=pdf.name if pdf else None,
+        filename=filename if pdf else None,
         created_at=digest.created_at,
         updated_at=digest.updated_at,
     )
@@ -99,7 +104,7 @@ async def list_digests(
     )
     items, total = await paginate(session, stmt, pagination)
     return Page(
-        items=[_to_out(d) for d in items],
+        items=[_to_out(d, profile.name) for d in items],
         total=total,
         limit=pagination.limit,
         offset=pagination.offset,
@@ -139,7 +144,7 @@ async def get_digest(digest_id: int, session: SessionDep) -> DigestDetail:
         rows = await session.execute(select(Topic.id, Topic.name).where(Topic.id.in_(topic_ids)))
         topic_names = {row.id: row.name for row in rows}
     return DigestDetail(
-        **_to_out(digest).model_dump(),
+        **_to_out(digest, await _profile_name(session, digest)).model_dump(),
         papers=[
             DigestPaperOut(
                 position=item.position,
@@ -196,7 +201,10 @@ async def download_digest_pdf(digest_id: int, session: SessionDep) -> FileRespon
     pdf = _pdf_file(digest)
     if pdf is None:
         raise NotFoundError("PDF-файл дайджеста не найден")
-    return FileResponse(pdf, media_type="application/pdf", filename=pdf.name)
+    filename = digest_filename(
+        digest.period_start, digest.period_end, await _profile_name(session, digest)
+    )
+    return FileResponse(pdf, media_type="application/pdf", filename=filename)
 
 
 @router.post("/{digest_id}/resend", response_model=RunDetail, status_code=status.HTTP_202_ACCEPTED)

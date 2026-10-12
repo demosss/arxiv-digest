@@ -195,7 +195,7 @@ def test_message_has_subject_text_html_and_pdf_attachment(db: Session, tmp_path:
     attachments = list(message.iter_attachments())
     assert len(attachments) == 1
     assert attachments[0].get_content_type() == "application/pdf"
-    assert attachments[0].get_filename() == "digest_2024-10-05.pdf"
+    assert attachments[0].get_filename() == "digest_Основной_2024-10-05.pdf"
     assert attachments[0].get_content() == PDF
 
 

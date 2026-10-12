@@ -26,7 +26,7 @@ from app.models import (
     Summary,
     Topic,
 )
-from app.services.files import profile_dir, remove_files
+from app.services.files import digest_filename, profile_dir, remove_files
 from app.services.latex_text import latex_to_text
 from app.services.prompts import SUMMARY_SECTIONS
 
@@ -120,13 +120,6 @@ def format_period(start: datetime, end: datetime, tz: ZoneInfo) -> str:
     fmt = f"{DATE_FORMAT} %H:%M"
     zone = start.astimezone(tz).tzname() or str(tz)
     return f"{start.astimezone(tz).strftime(fmt)} — {end.astimezone(tz).strftime(fmt)} ({zone})"
-
-
-def digest_filename(start: datetime, end: datetime) -> str:
-    first, last = start.astimezone(UTC).date(), end.astimezone(UTC).date()
-    if first == last:
-        return f"digest_{first.isoformat()}.pdf"
-    return f"digest_{first.isoformat()}_{last.isoformat()}.pdf"
 
 
 def capitalize_first(text: str) -> str:
