@@ -14,7 +14,7 @@
 ## Команды
 
 ```bash
-docker compose up -d --build                                           # весь стек, UI на http://localhost:8080
+docker compose up -d --build                                           # весь стек, UI на порту APP_PORT (по умолчанию 8080)
 docker compose -f docker-compose.test.yml run --rm --build tests       # ruff + mypy + pytest
 docker compose -f docker-compose.test.yml run --rm tests pytest tests/test_health.py   # один файл
 docker compose -f docker-compose.test.yml run --rm tests \
@@ -48,7 +48,8 @@ cd frontend && npm run lint && npm run format:check && npm run typecheck && npm 
 - **arXiv API вызывается по https** (`https://export.arxiv.org/api/query`): адрес из ТЗ с `http://` отвечает редиректом 301.
 - **Пауза `ARXIV_REQUEST_DELAY_SECONDS`** выдерживается между любыми запросами к arXiv — и к API, и при скачивании PDF.
 - **Статус пайплайна выводится из шагов** (`services/runs.py::_sync_parent`): ошибка или отмена шага переводит оставшиеся шаги в `skipped`, отдельной финализирующей задачи нет.
-- **Ретраи на уровне задачи** — только для `RetryableError` и ошибок соединения с БД (до 3 раз, 60/120/240 с); запуск на это время возвращается в `queued`, причина — в `error`.
+- **Ретраи на уровне задачи** — только для `RetryableError` и ошибок соединения с БД (до 3 раз, 60/120/240 с; у `ArxivUnavailableError` — 5/10/20 мин, база задаётся атрибутом `retry_backoff_base`); запуск на это время возвращается в `queued`, причина — в `error`.
+- **Паузы между попытками запроса к arXiv**: 5/10/20 с при сетевых ошибках и 5xx; при 429 и 503 (arXiv перегружен) — 30/60/120 с. Если arXiv прислал `Retry-After`, пауза не меньше него, но не больше 300 с.
 - **Повторный `collect`** дообрабатывает статьи, оставшиеся в `new` / `downloaded`, и те `failed`, у которых текст так и не был извлечён.
 - **Список литературы** отрезается по первому заголовку References / Bibliography после первых 30% текста; приложения после него тоже отбрасываются.
 - **Обновление сущностей — `PATCH`** с частичным телом (кроме singleton `PUT /smtp`).

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.errors import RetryableError
 from app.core.logging import configure_logging
 from app.models import Paper, RunStatus, RunTrigger, TaskLog, TaskRun, TaskType, Topic
 from app.schemas.runs import RunCreate
@@ -174,10 +175,34 @@ def test_retryable_error_requeues_run(
     result = collect_task.apply(args=[PERIOD], kwargs={"run_id": run.id})
 
     assert result.failed()
-    assert retries and retries[0]["countdown"] == 60
+    # arXiv перегружен минутами — у его ошибки своя, более длинная пауза
+    assert retries and retries[0]["countdown"] == 300
     db.refresh(run)
     assert run.status == RunStatus.QUEUED
     assert run.error and run.error.startswith("Повтор 1: ")
+
+
+def test_generic_retryable_error_uses_default_backoff(
+    db: Session, fake_arxiv: FakeSource, worker_logging: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _topic(db)
+    run = _run(db)
+
+    def unavailable(query: str, max_results: int) -> list[Any]:
+        raise RetryableError("временная ошибка")
+
+    monkeypatch.setattr(fake_arxiv, "search", unavailable)
+    retries: list[int] = []
+
+    def fake_retry(exc: Exception | None = None, countdown: int = 0, **_: Any) -> Exception:
+        retries.append(countdown)
+        return RuntimeError("retry scheduled")
+
+    monkeypatch.setattr(collect_task, "retry", fake_retry)
+
+    collect_task.apply(args=[PERIOD], kwargs={"run_id": run.id})
+
+    assert retries == [60]
 
 
 def test_cancelled_run_is_not_executed(

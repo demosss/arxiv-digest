@@ -10,6 +10,7 @@ from app.services.arxiv_client import (
     ArxivError,
     ArxivUnavailableError,
     parse_feed,
+    parse_retry_after,
     pdf_filename,
 )
 
@@ -48,6 +49,7 @@ def _client(handler: httpx.MockTransport, sleeps: list[float] | None = None) -> 
         user_agent="arxiv-digest-tests/1.0",
         sleep=recorded.append,
         backoff_base=1,
+        overload_backoff_base=10,
     )
 
 
@@ -172,7 +174,92 @@ def test_search_retries_with_exponential_backoff() -> None:
     results = _client(httpx.MockTransport(handler), sleeps).search("all:LLM", max_results=10)
 
     assert [e.arxiv_id for e in results] == ["2410.00001"]
-    assert sleeps == [1, 2]
+    # 503 — перегрузка, пауза от overload_backoff_base; сетевая ошибка — от backoff_base
+    assert sleeps == [10, 2]
+
+
+def test_rate_limit_uses_overload_backoff() -> None:
+    sleeps: list[float] = []
+
+    with pytest.raises(ArxivUnavailableError, match="HTTP 429"):
+        _client(httpx.MockTransport(lambda request: httpx.Response(429)), sleeps).search(
+            "all:LLM", max_results=10
+        )
+
+    assert sleeps == [10, 20, 40]
+
+
+def test_server_error_uses_regular_backoff() -> None:
+    sleeps: list[float] = []
+
+    with pytest.raises(ArxivUnavailableError, match="HTTP 502"):
+        _client(httpx.MockTransport(lambda request: httpx.Response(502)), sleeps).search(
+            "all:LLM", max_results=10
+        )
+
+    assert sleeps == [1, 2, 4]
+
+
+def test_retry_after_extends_backoff() -> None:
+    sleeps: list[float] = []
+    responses = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": "45"}),
+            httpx.Response(200, content=_feed(["2410.00001"], total=1)),
+        ]
+    )
+    client = _client(httpx.MockTransport(lambda request: next(responses)), sleeps)
+
+    assert len(client.search("all:LLM", max_results=10)) == 1
+    assert sleeps == [45]
+
+
+def test_short_retry_after_does_not_shorten_backoff() -> None:
+    sleeps: list[float] = []
+    responses = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": "2"}),
+            httpx.Response(200, content=_feed(["2410.00001"], total=1)),
+        ]
+    )
+    client = _client(httpx.MockTransport(lambda request: next(responses)), sleeps)
+
+    client.search("all:LLM", max_results=10)
+
+    assert sleeps == [10]
+
+
+def test_retry_after_is_capped() -> None:
+    sleeps: list[float] = []
+    responses = iter(
+        [
+            httpx.Response(503, headers={"Retry-After": "86400"}),
+            httpx.Response(200, content=_feed(["2410.00001"], total=1)),
+        ]
+    )
+    client = _client(httpx.MockTransport(lambda request: next(responses)), sleeps)
+
+    client.search("all:LLM", max_results=10)
+
+    assert sleeps == [300]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("120", 120.0),
+        (" 7 ", 7.0),
+        ("Mon, 05 Oct 2024 12:01:30 GMT", 90.0),
+        ("Mon, 05 Oct 2024 11:00:00 GMT", 0.0),
+        ("soon", None),
+    ],
+)
+def test_parse_retry_after(value: str | None, expected: float | None) -> None:
+    now = datetime(2024, 10, 5, 12, 0, tzinfo=UTC)
+
+    assert parse_retry_after(value, now) == expected
 
 
 def test_search_gives_up_after_max_attempts() -> None:

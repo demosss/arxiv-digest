@@ -82,7 +82,8 @@ def execute_step(task: Task, run_id: int, context: Context | None, step: StepFn)
                 result = step(session, run, context)
         except (RetryableError, OperationalError) as exc:
             if task.request.retries < MAX_TASK_RETRIES:
-                countdown = RETRY_BACKOFF_BASE_SECONDS * 2**task.request.retries
+                base = getattr(exc, "retry_backoff_base", None) or RETRY_BACKOFF_BASE_SECONDS
+                countdown = base * 2**task.request.retries
                 log.warning("step_retry_scheduled", error=str(exc), countdown_seconds=countdown)
                 with session_factory() as session:
                     runs.mark_retrying(

@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,11 @@ ARXIV_API_URL = "https://export.arxiv.org/api/query"
 PAGE_SIZE = 100
 MAX_ATTEMPTS = 4
 BACKOFF_BASE_SECONDS = 5.0
+# 429 и 503 — arXiv перегружен; за 5–20 с такая перегрузка не проходит
+OVERLOAD_BACKOFF_BASE_SECONDS = 30.0
+OVERLOAD_STATUSES = frozenset({429, 503})
+# Retry-After больше этого значения не ждём, чтобы не держать воркер
+MAX_RETRY_AFTER_SECONDS = 300.0
 # arXiv иногда отдаёт пустую страницу при непустой выдаче — такой ответ перезапрашивается
 MAX_EMPTY_PAGE_RETRIES = 2
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
@@ -35,6 +41,9 @@ class ArxivError(Exception):
 
 class ArxivUnavailableError(ArxivError, RetryableError):
     """arXiv недоступен после всех попыток: сетевые ошибки, 5xx, rate limit."""
+
+    # перегрузка arXiv длится минутами: шаг повторяется через 5, 10 и 20 минут
+    retry_backoff_base = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +132,22 @@ def parse_feed(content: str | bytes) -> tuple[list[ArxivEntry], int]:
     return entries, total
 
 
+def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    """Пауза из заголовка Retry-After (секунды или HTTP-дата); None — заголовка нет или он битый."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        moment = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return max(0.0, (moment - (now or datetime.now(UTC))).total_seconds())
+
+
 def pdf_filename(arxiv_id: str) -> str:
     """Имя файла для статьи; в старых идентификаторах (hep-th/9901001) есть слеш."""
     return f"{arxiv_id.replace('/', '_')}.pdf"
@@ -137,12 +162,14 @@ class ArxivClient:
         user_agent: str,
         sleep: Callable[[float], None] = time.sleep,
         backoff_base: float = BACKOFF_BASE_SECONDS,
+        overload_backoff_base: float = OVERLOAD_BACKOFF_BASE_SECONDS,
     ) -> None:
         self._http = http
         self._delay = request_delay
         self._headers = {"User-Agent": user_agent}
         self._sleep = sleep
         self._backoff_base = backoff_base
+        self._overload_backoff_base = overload_backoff_base
         self._last_request_at: float | None = None
 
     def _throttle(self) -> None:
@@ -158,6 +185,8 @@ class ArxivClient:
         last_error = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self._throttle()
+            base = self._backoff_base
+            retry_after: float | None = None
             try:
                 return action()
             except httpx.HTTPStatusError as exc:
@@ -166,10 +195,15 @@ class ArxivClient:
                 if status not in RETRYABLE_STATUSES:
                     log.error("arxiv_http_error", what=what, url=url, status=status)
                     raise ArxivError(f"{what}: {last_error} ({url})") from exc
+                if status in OVERLOAD_STATUSES:
+                    base = self._overload_backoff_base
+                retry_after = parse_retry_after(exc.response.headers.get("Retry-After"))
             except httpx.TransportError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
             if attempt < MAX_ATTEMPTS:
-                backoff = self._backoff_base * 2 ** (attempt - 1)
+                backoff = base * 2 ** (attempt - 1)
+                if retry_after is not None:
+                    backoff = max(backoff, min(retry_after, MAX_RETRY_AFTER_SECONDS))
                 log.warning(
                     "arxiv_retry",
                     what=what,
@@ -177,6 +211,7 @@ class ArxivClient:
                     attempt=attempt,
                     error=last_error,
                     backoff_seconds=backoff,
+                    retry_after=retry_after,
                 )
                 self._sleep(backoff)
         log.error("arxiv_unavailable", what=what, url=url, attempts=MAX_ATTEMPTS, error=last_error)
